@@ -50,3 +50,4 @@ push-via-ec2.sh
 .wrangler/
 .env*.local
 
+.idea

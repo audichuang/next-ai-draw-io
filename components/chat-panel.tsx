@@ -7,6 +7,7 @@ import {
     MessageSquarePlus,
     PanelRightClose,
     PanelRightOpen,
+    Save,
     Settings,
 } from "lucide-react"
 import Image from "next/image"
@@ -64,6 +65,14 @@ interface ChatPanelProps {
     onToggleDarkMode: () => void
     isMobile?: boolean
     onCloseProtectionChange?: (enabled: boolean) => void
+    /** Whether running in embed mode (inside iframe) */
+    isEmbedMode?: boolean
+    /** Callback to save diagram to parent window */
+    onSaveToParent?: () => Promise<void>
+    /** Initial chat history (JSON) from parent in embed mode */
+    initialChatHistory?: string
+    /** Callback to register getChatHistory function for export */
+    onChatHistoryExport?: (fn: () => string) => void
 }
 
 // Constants for tool states
@@ -103,6 +112,10 @@ export default function ChatPanel({
     onToggleDarkMode,
     isMobile = false,
     onCloseProtectionChange,
+    isEmbedMode = false,
+    onSaveToParent,
+    initialChatHistory,
+    onChatHistoryExport,
 }: ChatPanelProps) {
     const {
         loadDiagram: onDisplayChart,
@@ -196,6 +209,9 @@ export default function ChatPanel({
 
     // Flag to track if we've restored from localStorage
     const hasRestoredRef = useRef(false)
+
+    // Track loaded chat history in embed mode (to handle async postMessage)
+    const loadedChatHistoryRef = useRef<string>("")
 
     // Ref to track latest chartXML for use in callbacks (avoids stale closure)
     const chartXMLRef = useRef(chartXML)
@@ -702,12 +718,30 @@ Continue from EXACTLY where you stopped.`,
         messagesRef.current = messages
     }, [messages])
 
+    // Register getChatHistory callback for embed mode export
+    useEffect(() => {
+        if (!isEmbedMode || !onChatHistoryExport) return
+
+        // Register the callback that returns serialized chat history
+        onChatHistoryExport(() => {
+            const chatHistory = {
+                messages: messagesRef.current,
+                xmlSnapshots: Array.from(xmlSnapshotsRef.current.entries()),
+            }
+            return JSON.stringify(chatHistory)
+        })
+    }, [isEmbedMode, onChatHistoryExport])
+
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     // Restore messages and XML snapshots from localStorage on mount
+    // In embed mode, skip this - handled by separate useEffect below
     useEffect(() => {
         if (hasRestoredRef.current) return
         hasRestoredRef.current = true
+
+        // In embed mode, skip localStorage restore - handled by dedicated useEffect
+        if (isEmbedMode) return
 
         try {
             // Restore messages
@@ -734,11 +768,44 @@ Continue from EXACTLY where you stopped.`,
             localStorage.removeItem(STORAGE_XML_SNAPSHOTS_KEY)
             toast.error("Session data was corrupted. Starting fresh.")
         }
-    }, [setMessages])
+    }, [setMessages, isEmbedMode])
+
+    // Handle chat history loading in embed mode (async via postMessage)
+    // This is separate from localStorage restore because initialChatHistory arrives after first render
+    useEffect(() => {
+        // Only handle embed mode
+        if (!isEmbedMode) return
+
+        // No chat history or already loaded the same one
+        if (!initialChatHistory) return
+        if (initialChatHistory === loadedChatHistoryRef.current) return
+
+        try {
+            const parsed = JSON.parse(initialChatHistory)
+            if (parsed.messages && Array.isArray(parsed.messages)) {
+                setMessages(parsed.messages)
+            }
+            if (parsed.xmlSnapshots) {
+                xmlSnapshotsRef.current = new Map(parsed.xmlSnapshots)
+            }
+            loadedChatHistoryRef.current = initialChatHistory
+            console.log(
+                "[NextAI ChatPanel] Loaded chat history from parent, messages:",
+                parsed.messages?.length,
+            )
+        } catch (error) {
+            console.error(
+                "[NextAI ChatPanel] Failed to parse initialChatHistory:",
+                error,
+            )
+        }
+    }, [isEmbedMode, initialChatHistory, setMessages])
 
     // Save messages to localStorage whenever they change (debounced to prevent blocking during streaming)
+    // Skip in embed mode - data is stored in parent window
     useEffect(() => {
         if (!hasRestoredRef.current) return
+        if (isEmbedMode) return // Skip localStorage in embed mode
 
         // Clear any pending save
         if (localStorageDebounceRef.current) {
@@ -763,10 +830,12 @@ Continue from EXACTLY where you stopped.`,
                 clearTimeout(localStorageDebounceRef.current)
             }
         }
-    }, [messages])
+    }, [messages, isEmbedMode])
 
     // Save XML snapshots to localStorage whenever they change
+    // Skip in embed mode - data is stored in parent window
     const saveXmlSnapshots = useCallback(() => {
+        if (isEmbedMode) return // Skip localStorage in embed mode
         try {
             const snapshotsArray = Array.from(xmlSnapshotsRef.current.entries())
             localStorage.setItem(
@@ -779,12 +848,13 @@ Continue from EXACTLY where you stopped.`,
                 error,
             )
         }
-    }, [])
+    }, [isEmbedMode])
 
-    // Save session ID to localStorage
+    // Save session ID to localStorage (skip in embed mode)
     useEffect(() => {
+        if (isEmbedMode) return
         localStorage.setItem(STORAGE_SESSION_ID_KEY, sessionId)
-    }, [sessionId])
+    }, [sessionId, isEmbedMode])
 
     useEffect(() => {
         if (messagesEndRef.current) {
@@ -793,7 +863,10 @@ Continue from EXACTLY where you stopped.`,
     }, [messages])
 
     // Save state right before page unload (refresh/close)
+    // Skip in embed mode - data is stored in parent window
     useEffect(() => {
+        if (isEmbedMode) return
+
         const handleBeforeUnload = () => {
             try {
                 localStorage.setItem(
@@ -819,7 +892,7 @@ Continue from EXACTLY where you stopped.`,
         window.addEventListener("beforeunload", handleBeforeUnload)
         return () =>
             window.removeEventListener("beforeunload", handleBeforeUnload)
-    }, [sessionId])
+    }, [sessionId, isEmbedMode])
 
     const onFormSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
@@ -929,6 +1002,15 @@ Continue from EXACTLY where you stopped.`,
             .slice(2, 9)}`
         setSessionId(newSessionId)
         xmlSnapshotsRef.current.clear()
+        loadedChatHistoryRef.current = "" // Reset for embed mode to allow reloading
+
+        // Skip localStorage operations in embed mode
+        if (isEmbedMode) {
+            toast.success("Started a fresh chat")
+            setShowNewChatDialog(false)
+            return
+        }
+
         // Clear localStorage with error handling
         try {
             localStorage.removeItem(STORAGE_MESSAGES_KEY)
@@ -945,7 +1027,7 @@ Continue from EXACTLY where you stopped.`,
         }
 
         setShowNewChatDialog(false)
-    }, [clearDiagram, handleFileChange, setMessages, setSessionId])
+    }, [clearDiagram, handleFileChange, setMessages, setSessionId, isEmbedMode])
 
     const handleInputChange = (
         e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -1276,6 +1358,24 @@ Continue from EXACTLY where you stopped.`,
                         )}
                     </div>
                     <div className="flex items-center gap-1 justify-end overflow-visible">
+                        {/* Embed mode: Save & Close button */}
+                        {isEmbedMode && onSaveToParent && (
+                            <>
+                                <ButtonWithTooltip
+                                    tooltipContent="Save & Close"
+                                    variant="default"
+                                    size="sm"
+                                    onClick={onSaveToParent}
+                                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                                >
+                                    <Save
+                                        className={`${isMobile ? "h-4 w-4" : "h-4 w-4"} mr-1`}
+                                    />
+                                    Save
+                                </ButtonWithTooltip>
+                                <div className="w-px h-5 bg-border mx-1" />
+                            </>
+                        )}
                         <ButtonWithTooltip
                             tooltipContent={dict.nav.newChat}
                             variant="ghost"

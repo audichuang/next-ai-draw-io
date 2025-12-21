@@ -10,11 +10,21 @@ import {
     ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { useDiagram } from "@/contexts/diagram-context"
+import { useEmbedMode } from "@/hooks/use-embed-mode"
+
+// Debug: Log when this module is loaded
+console.log(
+    "[NextAI page.tsx] Module loaded, URL:",
+    typeof window !== "undefined" ? window.location.href : "SSR",
+)
 
 const drawioBaseUrl =
     process.env.NEXT_PUBLIC_DRAWIO_BASE_URL || "https://embed.diagrams.net"
 
 export default function Home() {
+    // Debug: Log when component renders
+    console.log("[NextAI page.tsx] Home component rendering")
+
     const {
         drawioRef,
         handleDiagramExport,
@@ -24,6 +34,32 @@ export default function Home() {
         showSaveDialog,
         setShowSaveDialog,
     } = useDiagram()
+
+    // State for chat history from parent (in embed mode)
+    const [parentChatHistory, setParentChatHistory] = useState<string>("")
+    // Ref to get current chat history for export
+    const getChatHistoryRef = useRef<(() => string) | null>(null)
+
+    // Callback to get chat history for export
+    const getChatHistory = useCallback(() => {
+        return getChatHistoryRef.current?.() || ""
+    }, [])
+
+    // Callback when parent sends chat history
+    const handleChatHistoryLoaded = useCallback((chatHistory: string) => {
+        console.log(
+            "[NextAI page.tsx] Chat history loaded from parent, length:",
+            chatHistory?.length,
+        )
+        setParentChatHistory(chatHistory)
+    }, [])
+
+    // Embed mode hook for parent window communication
+    const { isEmbedMode, triggerSaveToParent } = useEmbedMode({
+        onChatHistoryLoaded: handleChatHistoryLoaded,
+        getChatHistory,
+    })
+
     const [isMobile, setIsMobile] = useState(false)
     const [isChatVisible, setIsChatVisible] = useState(true)
     const [drawioUi, setDrawioUi] = useState<"min" | "sketch">("min")
@@ -240,6 +276,12 @@ export default function Home() {
                             onToggleDarkMode={handleDarkModeChange}
                             isMobile={isMobile}
                             onCloseProtectionChange={setCloseProtection}
+                            isEmbedMode={isEmbedMode}
+                            onSaveToParent={triggerSaveToParent}
+                            initialChatHistory={parentChatHistory}
+                            onChatHistoryExport={(fn) => {
+                                getChatHistoryRef.current = fn
+                            }}
                         />
                     </div>
                 </ResizablePanel>

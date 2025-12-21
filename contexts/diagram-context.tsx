@@ -5,11 +5,13 @@ import { createContext, useContext, useEffect, useRef, useState } from "react"
 import type { DrawIoEmbedRef } from "react-drawio"
 import { STORAGE_DIAGRAM_XML_KEY } from "@/components/chat-panel"
 import type { ExportFormat } from "@/components/save-dialog"
+import { isEmbedMode } from "@/lib/embed-api"
 import { extractDiagramXML, validateAndFixXml } from "../lib/utils"
 
 interface DiagramContextType {
     chartXML: string
     latestSvg: string
+    exportCounter: number // Counter to force useEffect trigger
     diagramHistory: { svg: string; xml: string }[]
     loadDiagram: (chart: string, skipValidation?: boolean) => string | null
     handleExport: () => void
@@ -36,6 +38,7 @@ const DiagramContext = createContext<DiagramContextType | undefined>(undefined)
 export function DiagramProvider({ children }: { children: React.ReactNode }) {
     const [chartXML, setChartXML] = useState<string>("")
     const [latestSvg, setLatestSvg] = useState<string>("")
+    const [exportCounter, setExportCounter] = useState<number>(0)
     const [diagramHistory, setDiagramHistory] = useState<
         { svg: string; xml: string }[]
     >([])
@@ -76,6 +79,12 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         if (hasDiagramRestoredRef.current) return
         hasDiagramRestoredRef.current = true
 
+        // In embed mode, don't restore from localStorage - wait for parent to send diagram
+        if (isEmbedMode()) {
+            setCanSaveDiagram(true)
+            return
+        }
+
         try {
             const savedDiagramXml = localStorage.getItem(
                 STORAGE_DIAGRAM_XML_KEY,
@@ -95,9 +104,11 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     }, [isDrawioReady])
 
     // Save diagram XML to localStorage whenever it changes (debounced)
+    // In embed mode, skip localStorage saving - parent handles persistence
     useEffect(() => {
         if (!canSaveDiagram) return
         if (!chartXML || chartXML.length <= 300) return
+        if (isEmbedMode()) return // Skip localStorage in embed mode
 
         const timeoutId = setTimeout(() => {
             localStorage.setItem(STORAGE_DIAGRAM_XML_KEY, chartXML)
@@ -116,18 +127,28 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         if (drawioRef.current) {
             // Mark that this export should be saved to history
             expectHistoryExportRef.current = true
+            console.log("[NextAI context] handleExport called (with history)")
             drawioRef.current.exportDiagram({
                 format: "xmlsvg",
             })
+        } else {
+            console.error(
+                "[NextAI context] handleExport: drawioRef.current is null",
+            )
         }
     }
 
     const handleExportWithoutHistory = () => {
         if (drawioRef.current) {
             // Export without saving to history (for edit_diagram fetching current state)
+            console.log("[NextAI context] handleExportWithoutHistory called")
             drawioRef.current.exportDiagram({
                 format: "xmlsvg",
             })
+        } else {
+            console.error(
+                "[NextAI context] handleExportWithoutHistory: drawioRef.current is null",
+            )
         }
     }
 
@@ -194,6 +215,11 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     }
 
     const handleDiagramExport = (data: any) => {
+        console.log(
+            "[NextAI context] handleDiagramExport called, data.data length:",
+            data?.data?.length,
+        )
+
         // Handle save to file if requested (process raw data before extraction)
         if (saveResolverRef.current.resolver) {
             const format = saveResolverRef.current.format
@@ -207,8 +233,15 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         }
 
         const extractedXML = extractDiagramXML(data.data)
+        console.log(
+            "[NextAI context] Extracted XML length:",
+            extractedXML?.length,
+        )
         setChartXML(extractedXML)
         setLatestSvg(data.data)
+        // Increment counter to ensure useEffect triggers even if SVG content is same
+        setExportCounter((c) => c + 1)
+        console.log("[NextAI context] Updated chartXML and latestSvg")
 
         // Only add to history if this was a user-initiated export
         // Limit to 20 entries to prevent memory leaks during long sessions
@@ -344,6 +377,7 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
             value={{
                 chartXML,
                 latestSvg,
+                exportCounter,
                 diagramHistory,
                 loadDiagram,
                 handleExport,
