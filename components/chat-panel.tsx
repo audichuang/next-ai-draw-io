@@ -23,6 +23,7 @@ import { ResetWarningModal } from "@/components/reset-warning-modal"
 import { SettingsDialog } from "@/components/settings-dialog"
 import { useDiagram } from "@/contexts/diagram-context"
 import { useDictionary } from "@/hooks/use-dictionary"
+import { useEmbedChatHistory } from "@/hooks/use-embed-chat-history"
 import { getAIConfig } from "@/lib/ai-config"
 import { findCachedResponse } from "@/lib/cached-responses"
 import { isPdfFile, isTextFile } from "@/lib/pdf-utils"
@@ -209,9 +210,6 @@ export default function ChatPanel({
 
     // Flag to track if we've restored from localStorage
     const hasRestoredRef = useRef(false)
-
-    // Track loaded chat history in embed mode (to handle async postMessage)
-    const loadedChatHistoryRef = useRef<string>("")
 
     // Ref to track latest chartXML for use in callbacks (avoids stale closure)
     const chartXMLRef = useRef(chartXML)
@@ -712,6 +710,14 @@ Continue from EXACTLY where you stopped.`,
     // Update stopRef so onToolCall can access it
     stopRef.current = stop
 
+    // Handle embed mode chat history loading (async via postMessage)
+    const { resetLoadedHistory } = useEmbedChatHistory({
+        isEmbedMode,
+        initialChatHistory,
+        setMessages,
+        xmlSnapshotsRef,
+    })
+
     // Ref to track latest messages for unload persistence
     const messagesRef = useRef(messages)
     useEffect(() => {
@@ -769,37 +775,6 @@ Continue from EXACTLY where you stopped.`,
             toast.error("Session data was corrupted. Starting fresh.")
         }
     }, [setMessages, isEmbedMode])
-
-    // Handle chat history loading in embed mode (async via postMessage)
-    // This is separate from localStorage restore because initialChatHistory arrives after first render
-    useEffect(() => {
-        // Only handle embed mode
-        if (!isEmbedMode) return
-
-        // No chat history or already loaded the same one
-        if (!initialChatHistory) return
-        if (initialChatHistory === loadedChatHistoryRef.current) return
-
-        try {
-            const parsed = JSON.parse(initialChatHistory)
-            if (parsed.messages && Array.isArray(parsed.messages)) {
-                setMessages(parsed.messages)
-            }
-            if (parsed.xmlSnapshots) {
-                xmlSnapshotsRef.current = new Map(parsed.xmlSnapshots)
-            }
-            loadedChatHistoryRef.current = initialChatHistory
-            console.log(
-                "[NextAI ChatPanel] Loaded chat history from parent, messages:",
-                parsed.messages?.length,
-            )
-        } catch (error) {
-            console.error(
-                "[NextAI ChatPanel] Failed to parse initialChatHistory:",
-                error,
-            )
-        }
-    }, [isEmbedMode, initialChatHistory, setMessages])
 
     // Save messages to localStorage whenever they change (debounced to prevent blocking during streaming)
     // Skip in embed mode - data is stored in parent window
@@ -1002,7 +977,7 @@ Continue from EXACTLY where you stopped.`,
             .slice(2, 9)}`
         setSessionId(newSessionId)
         xmlSnapshotsRef.current.clear()
-        loadedChatHistoryRef.current = "" // Reset for embed mode to allow reloading
+        resetLoadedHistory() // Reset for embed mode to allow reloading
 
         // Skip localStorage operations in embed mode
         if (isEmbedMode) {
@@ -1027,7 +1002,14 @@ Continue from EXACTLY where you stopped.`,
         }
 
         setShowNewChatDialog(false)
-    }, [clearDiagram, handleFileChange, setMessages, setSessionId, isEmbedMode])
+    }, [
+        clearDiagram,
+        handleFileChange,
+        setMessages,
+        setSessionId,
+        isEmbedMode,
+        resetLoadedHistory,
+    ])
 
     const handleInputChange = (
         e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
