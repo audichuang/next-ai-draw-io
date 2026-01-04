@@ -51,3 +51,19 @@ push-via-ec2.sh
 .env*.local
 
 .idea
+# Electron
+/dist-electron/
+/release/
+/electron-standalone/
+*.dmg
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.snap
+
+CLAUDE.md
+.spec-workflow
+
+# edgeone
+.edgeone

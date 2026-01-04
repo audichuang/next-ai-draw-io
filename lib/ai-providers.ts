@@ -19,7 +19,10 @@ export type ProviderName =
     | "openrouter"
     | "deepseek"
     | "siliconflow"
+    | "sglang"
     | "gateway"
+    | "edgeone"
+    | "doubao"
 
 interface ModelConfig {
     model: any
@@ -33,6 +36,13 @@ export interface ClientOverrides {
     baseUrl?: string | null
     apiKey?: string | null
     modelId?: string | null
+    // AWS Bedrock credentials
+    awsAccessKeyId?: string | null
+    awsSecretAccessKey?: string | null
+    awsRegion?: string | null
+    awsSessionToken?: string | null
+    // Custom headers (e.g., for EdgeOne cookie auth)
+    headers?: Record<string, string>
 }
 
 // Providers that can be used with client-provided API keys
@@ -41,10 +51,14 @@ const ALLOWED_CLIENT_PROVIDERS: ProviderName[] = [
     "anthropic",
     "google",
     "azure",
+    "bedrock",
     "openrouter",
     "deepseek",
     "siliconflow",
+    "sglang",
     "gateway",
+    "edgeone",
+    "doubao",
 ]
 
 // Bedrock provider options for Anthropic beta features
@@ -87,8 +101,8 @@ function parseIntSafe(
  * Supports various AI SDK providers with their unique configuration options
  *
  * Environment variables:
- * - OPENAI_REASONING_EFFORT: OpenAI reasoning effort level (minimal/low/medium/high) - for o1/o3/gpt-5
- * - OPENAI_REASONING_SUMMARY: OpenAI reasoning summary (none/brief/detailed) - auto-enabled for o1/o3/gpt-5
+ * - OPENAI_REASONING_EFFORT: OpenAI reasoning effort level (minimal/low/medium/high) - for o1/o3/o4/gpt-5
+ * - OPENAI_REASONING_SUMMARY: OpenAI reasoning summary (auto/detailed) - auto-enabled for o1/o3/o4/gpt-5
  * - ANTHROPIC_THINKING_BUDGET_TOKENS: Anthropic thinking budget in tokens (1024-64000)
  * - ANTHROPIC_THINKING_TYPE: Anthropic thinking type (enabled)
  * - GOOGLE_THINKING_BUDGET: Google Gemini 2.5 thinking budget in tokens (1024-100000)
@@ -110,18 +124,19 @@ function buildProviderOptions(
             const reasoningEffort = process.env.OPENAI_REASONING_EFFORT
             const reasoningSummary = process.env.OPENAI_REASONING_SUMMARY
 
-            // OpenAI reasoning models (o1, o3, gpt-5) need reasoningSummary to return thoughts
+            // OpenAI reasoning models (o1, o3, o4, gpt-5) need reasoningSummary to return thoughts
             if (
                 modelId &&
                 (modelId.includes("o1") ||
                     modelId.includes("o3") ||
+                    modelId.includes("o4") ||
                     modelId.includes("gpt-5"))
             ) {
                 options.openai = {
-                    // Auto-enable reasoning summary for reasoning models (default: detailed)
+                    // Auto-enable reasoning summary for reasoning models
+                    // Use 'auto' as default since not all models support 'detailed'
                     reasoningSummary:
-                        (reasoningSummary as "none" | "brief" | "detailed") ||
-                        "detailed",
+                        (reasoningSummary as "auto" | "detailed") || "auto",
                 }
 
                 // Optionally configure reasoning effort
@@ -144,8 +159,7 @@ function buildProviderOptions(
                 }
                 if (reasoningSummary) {
                     options.openai.reasoningSummary = reasoningSummary as
-                        | "none"
-                        | "brief"
+                        | "auto"
                         | "detailed"
                 }
             }
@@ -337,7 +351,9 @@ function buildProviderOptions(
         case "deepseek":
         case "openrouter":
         case "siliconflow":
-        case "gateway": {
+        case "sglang":
+        case "gateway":
+        case "doubao": {
             // These providers don't have reasoning configs in AI SDK yet
             // Gateway passes through to underlying providers which handle their own configs
             break
@@ -361,7 +377,10 @@ const PROVIDER_ENV_VARS: Record<ProviderName, string | null> = {
     openrouter: "OPENROUTER_API_KEY",
     deepseek: "DEEPSEEK_API_KEY",
     siliconflow: "SILICONFLOW_API_KEY",
+    sglang: "SGLANG_API_KEY",
     gateway: "AI_GATEWAY_API_KEY",
+    edgeone: null, // No credentials needed - uses EdgeOne Edge AI
+    doubao: "DOUBAO_API_KEY",
 }
 
 /**
@@ -440,7 +459,7 @@ function validateProviderCredentials(provider: ProviderName): void {
  * Get the AI model based on environment variables
  *
  * Environment variables:
- * - AI_PROVIDER: The provider to use (bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow)
+ * - AI_PROVIDER: The provider to use (bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway)
  * - AI_MODEL: The model ID/name for the selected provider
  *
  * Provider-specific env vars:
@@ -456,12 +475,19 @@ function validateProviderCredentials(provider: ProviderName): void {
  * - DEEPSEEK_BASE_URL: DeepSeek endpoint (optional)
  * - SILICONFLOW_API_KEY: SiliconFlow API key
  * - SILICONFLOW_BASE_URL: SiliconFlow endpoint (optional, defaults to https://api.siliconflow.com/v1)
+ * - SGLANG_API_KEY: SGLang API key
+ * - SGLANG_BASE_URL: SGLang endpoint (optional)
  */
 export function getAIModel(overrides?: ClientOverrides): ModelConfig {
     // SECURITY: Prevent SSRF attacks (GHSA-9qf7-mprq-9qgm)
     // If a custom baseUrl is provided, an API key MUST also be provided.
     // This prevents attackers from redirecting server API keys to malicious endpoints.
-    if (overrides?.baseUrl && !overrides?.apiKey) {
+    // Exception: EdgeOne provider doesn't require API key (uses Edge AI runtime)
+    if (
+        overrides?.baseUrl &&
+        !overrides?.apiKey &&
+        overrides?.provider !== "edgeone"
+    ) {
         throw new Error(
             `API key is required when using a custom base URL. ` +
                 `Please provide your own API key in Settings.`,
@@ -524,6 +550,7 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
                         `- OPENROUTER_API_KEY for OpenRouter\n` +
                         `- AZURE_API_KEY for Azure\n` +
                         `- SILICONFLOW_API_KEY for SiliconFlow\n` +
+                        `- SGLANG_API_KEY for SGLang\n` +
                         `Or set AI_PROVIDER=ollama for local Ollama.`,
                 )
             } else {
@@ -551,12 +578,25 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
 
     switch (provider) {
         case "bedrock": {
-            // Use credential provider chain for IAM role support (Lambda, EC2, etc.)
-            // Falls back to env vars (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) for local dev
-            const bedrockProvider = createAmazonBedrock({
-                region: process.env.AWS_REGION || "us-west-2",
-                credentialProvider: fromNodeProviderChain(),
-            })
+            // Use client-provided credentials if available, otherwise fall back to IAM/env vars
+            const hasClientCredentials =
+                overrides?.awsAccessKeyId && overrides?.awsSecretAccessKey
+            const bedrockRegion =
+                overrides?.awsRegion || process.env.AWS_REGION || "us-west-2"
+
+            const bedrockProvider = hasClientCredentials
+                ? createAmazonBedrock({
+                      region: bedrockRegion,
+                      accessKeyId: overrides.awsAccessKeyId!,
+                      secretAccessKey: overrides.awsSecretAccessKey!,
+                      ...(overrides?.awsSessionToken && {
+                          sessionToken: overrides.awsSessionToken,
+                      }),
+                  })
+                : createAmazonBedrock({
+                      region: bedrockRegion,
+                      credentialProvider: fromNodeProviderChain(),
+                  })
             model = bedrockProvider(modelId)
             // Add Anthropic beta options if using Claude models via Bedrock
             if (modelId.includes("anthropic.claude")) {
@@ -576,12 +616,16 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
         case "openai": {
             const apiKey = overrides?.apiKey || process.env.OPENAI_API_KEY
             const baseURL = overrides?.baseUrl || process.env.OPENAI_BASE_URL
-            if (baseURL || overrides?.apiKey) {
-                const customOpenAI = createOpenAI({
-                    apiKey,
-                    ...(baseURL && { baseURL }),
-                })
+            if (baseURL) {
+                // Custom base URL = third-party proxy, use Chat Completions API
+                // for compatibility (most proxies don't support /responses endpoint)
+                const customOpenAI = createOpenAI({ apiKey, baseURL })
                 model = customOpenAI.chat(modelId)
+            } else if (overrides?.apiKey) {
+                // Custom API key but official OpenAI endpoint, use Responses API
+                // to support reasoning for gpt-5, o1, o3, o4 models
+                const customOpenAI = createOpenAI({ apiKey })
+                model = customOpenAI(modelId)
             } else {
                 model = openai(modelId)
             }
@@ -707,6 +751,112 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
             break
         }
 
+        case "sglang": {
+            const apiKey = overrides?.apiKey || process.env.SGLANG_API_KEY
+            const baseURL = overrides?.baseUrl || process.env.SGLANG_BASE_URL
+
+            const sglangProvider = createOpenAI({
+                apiKey,
+                baseURL,
+                // Add a custom fetch wrapper to intercept and fix the stream from sglang
+                fetch: async (url, options) => {
+                    const response = await fetch(url, options)
+                    if (!response.body) {
+                        return response
+                    }
+
+                    // Create a transform stream to fix the non-compliant sglang stream
+                    let buffer = ""
+                    const decoder = new TextDecoder()
+
+                    const transformStream = new TransformStream({
+                        transform(chunk, controller) {
+                            buffer += decoder.decode(chunk, { stream: true })
+                            // Process all complete messages in the buffer
+                            let messageEndPos
+                            while (
+                                (messageEndPos = buffer.indexOf("\n\n")) !== -1
+                            ) {
+                                const message = buffer.substring(
+                                    0,
+                                    messageEndPos,
+                                )
+                                buffer = buffer.substring(messageEndPos + 2) // Move past the '\n\n'
+
+                                if (message.startsWith("data: ")) {
+                                    const jsonStr = message.substring(6).trim()
+                                    if (jsonStr === "[DONE]") {
+                                        controller.enqueue(
+                                            new TextEncoder().encode(
+                                                message + "\n\n",
+                                            ),
+                                        )
+                                        continue
+                                    }
+                                    try {
+                                        const data = JSON.parse(jsonStr)
+                                        const delta = data.choices?.[0]?.delta
+
+                                        if (delta) {
+                                            // Fix 1: remove invalid empty role
+                                            if (delta.role === "") {
+                                                delete delta.role
+                                            }
+                                            // Fix 2: remove non-standard reasoning_content field
+                                            if ("reasoning_content" in delta) {
+                                                delete delta.reasoning_content
+                                            }
+                                        }
+
+                                        // Re-serialize and forward the corrected data with the correct SSE format
+                                        controller.enqueue(
+                                            new TextEncoder().encode(
+                                                `data: ${JSON.stringify(data)}\n\n`,
+                                            ),
+                                        )
+                                    } catch (_e) {
+                                        // If parsing fails, forward the original message to avoid breaking the stream.
+                                        controller.enqueue(
+                                            new TextEncoder().encode(
+                                                message + "\n\n",
+                                            ),
+                                        )
+                                    }
+                                } else if (message.trim() !== "") {
+                                    // Pass through other message types (e.g., 'event: ...')
+                                    controller.enqueue(
+                                        new TextEncoder().encode(
+                                            message + "\n\n",
+                                        ),
+                                    )
+                                }
+                            }
+                        },
+                        flush(controller) {
+                            // If there's anything left in the buffer, forward it.
+                            if (buffer.trim()) {
+                                controller.enqueue(
+                                    new TextEncoder().encode(buffer),
+                                )
+                            }
+                        },
+                    })
+
+                    const transformedBody =
+                        response.body.pipeThrough(transformStream)
+
+                    // Return a new response with the transformed body
+                    return new Response(transformedBody, {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: response.headers,
+                    })
+                },
+            })
+            model = sglangProvider.chat(modelId)
+            break
+        }
+
         case "gateway": {
             // Vercel AI Gateway - unified access to multiple AI providers
             // Model format: "provider/model" e.g., "openai/gpt-4o", "anthropic/claude-sonnet-4-5"
@@ -728,9 +878,38 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
             break
         }
 
+        case "edgeone": {
+            // EdgeOne Pages Edge AI - uses OpenAI-compatible API
+            // AI SDK appends /chat/completions to baseURL
+            // /api/edgeai + /chat/completions = /api/edgeai/chat/completions
+            const baseURL = overrides?.baseUrl || "/api/edgeai"
+            const edgeoneProvider = createOpenAI({
+                apiKey: "edgeone", // Dummy key - EdgeOne doesn't require API key
+                baseURL,
+                // Pass cookies for EdgeOne Pages authentication (eo_token, eo_time)
+                ...(overrides?.headers && { headers: overrides.headers }),
+            })
+            model = edgeoneProvider.chat(modelId)
+            break
+        }
+
+        case "doubao": {
+            const apiKey = overrides?.apiKey || process.env.DOUBAO_API_KEY
+            const baseURL =
+                overrides?.baseUrl ||
+                process.env.DOUBAO_BASE_URL ||
+                "https://ark.cn-beijing.volces.com/api/v3"
+            const doubaoProvider = createDeepSeek({
+                apiKey,
+                baseURL,
+            })
+            model = doubaoProvider(modelId)
+            break
+        }
+
         default:
             throw new Error(
-                `Unknown AI provider: ${provider}. Supported providers: bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, gateway`,
+                `Unknown AI provider: ${provider}. Supported providers: bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway, edgeone, doubao`,
             )
     }
 
@@ -754,4 +933,35 @@ export function supportsPromptCaching(modelId: string): boolean {
         modelId.startsWith("us.anthropic") ||
         modelId.startsWith("eu.anthropic")
     )
+}
+
+/**
+ * Check if a model supports image/vision input.
+ * Some models silently drop image parts without error (AI SDK warning only).
+ */
+export function supportsImageInput(modelId: string): boolean {
+    const lowerModelId = modelId.toLowerCase()
+
+    // Helper to check if model has vision capability indicator
+    const hasVisionIndicator =
+        lowerModelId.includes("vision") || lowerModelId.includes("vl")
+
+    // Models that DON'T support image/vision input (unless vision variant)
+    // Kimi K2 models don't support images
+    if (lowerModelId.includes("kimi") && !hasVisionIndicator) {
+        return false
+    }
+
+    // DeepSeek text models (not vision variants)
+    if (lowerModelId.includes("deepseek") && !hasVisionIndicator) {
+        return false
+    }
+
+    // Qwen text models (not vision variants like qwen-vl)
+    if (lowerModelId.includes("qwen") && !hasVisionIndicator) {
+        return false
+    }
+
+    // Default: assume model supports images
+    return true
 }

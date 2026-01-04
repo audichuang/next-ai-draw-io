@@ -1,7 +1,8 @@
 "use client"
 
-import { Moon, Sun } from "lucide-react"
-import { useEffect, useState } from "react"
+import { Github, Info, Moon, Sun, Tag } from "lucide-react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { Suspense, useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -21,6 +22,39 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useDictionary } from "@/hooks/use-dictionary"
+import { getApiEndpoint } from "@/lib/base-path"
+import { i18n, type Locale } from "@/lib/i18n/config"
+
+// Reusable setting item component for consistent layout
+function SettingItem({
+    label,
+    description,
+    children,
+}: {
+    label: string
+    description?: string
+    children: React.ReactNode
+}) {
+    return (
+        <div className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
+            <div className="space-y-0.5 pr-4">
+                <Label className="text-sm font-medium">{label}</Label>
+                {description && (
+                    <p className="text-xs text-muted-foreground max-w-[260px]">
+                        {description}
+                    </p>
+                )}
+            </div>
+            <div className="shrink-0">{children}</div>
+        </div>
+    )
+}
+
+const LANGUAGE_LABELS: Record<Locale, string> = {
+    en: "English",
+    zh: "中文",
+    ja: "日本語",
+}
 
 interface SettingsDialogProps {
     open: boolean
@@ -30,15 +64,13 @@ interface SettingsDialogProps {
     onToggleDrawioUi: () => void
     darkMode: boolean
     onToggleDarkMode: () => void
+    minimalStyle?: boolean
+    onMinimalStyleChange?: (value: boolean) => void
 }
 
 export const STORAGE_ACCESS_CODE_KEY = "next-ai-draw-io-access-code"
 export const STORAGE_CLOSE_PROTECTION_KEY = "next-ai-draw-io-close-protection"
 const STORAGE_ACCESS_CODE_REQUIRED_KEY = "next-ai-draw-io-access-code-required"
-export const STORAGE_AI_PROVIDER_KEY = "next-ai-draw-io-ai-provider"
-export const STORAGE_AI_BASE_URL_KEY = "next-ai-draw-io-ai-base-url"
-export const STORAGE_AI_API_KEY_KEY = "next-ai-draw-io-ai-api-key"
-export const STORAGE_AI_MODEL_KEY = "next-ai-draw-io-ai-model"
 
 function getStoredAccessCodeRequired(): boolean | null {
     if (typeof window === "undefined") return null
@@ -47,7 +79,7 @@ function getStoredAccessCodeRequired(): boolean | null {
     return stored === "true"
 }
 
-export function SettingsDialog({
+function SettingsContent({
     open,
     onOpenChange,
     onCloseProtectionChange,
@@ -55,8 +87,13 @@ export function SettingsDialog({
     onToggleDrawioUi,
     darkMode,
     onToggleDarkMode,
+    minimalStyle = false,
+    onMinimalStyleChange = () => {},
 }: SettingsDialogProps) {
     const dict = useDictionary()
+    const router = useRouter()
+    const pathname = usePathname() || "/"
+    const search = useSearchParams()
     const [accessCode, setAccessCode] = useState("")
     const [closeProtection, setCloseProtection] = useState(true)
     const [isVerifying, setIsVerifying] = useState(false)
@@ -64,16 +101,13 @@ export function SettingsDialog({
     const [accessCodeRequired, setAccessCodeRequired] = useState(
         () => getStoredAccessCodeRequired() ?? false,
     )
-    const [provider, setProvider] = useState("")
-    const [baseUrl, setBaseUrl] = useState("")
-    const [apiKey, setApiKey] = useState("")
-    const [modelId, setModelId] = useState("")
+    const [currentLang, setCurrentLang] = useState("en")
 
     useEffect(() => {
         // Only fetch if not cached in localStorage
         if (getStoredAccessCodeRequired() !== null) return
 
-        fetch("/api/config")
+        fetch(getApiEndpoint("/api/config"))
             .then((res) => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`)
                 return res.json()
@@ -92,6 +126,17 @@ export function SettingsDialog({
             })
     }, [])
 
+    // Detect current language from pathname
+    useEffect(() => {
+        const seg = pathname.split("/").filter(Boolean)
+        const first = seg[0]
+        if (first && i18n.locales.includes(first as Locale)) {
+            setCurrentLang(first)
+        } else {
+            setCurrentLang(i18n.defaultLocale)
+        }
+    }, [pathname])
+
     useEffect(() => {
         if (open) {
             const storedCode =
@@ -104,15 +149,24 @@ export function SettingsDialog({
             // Default to true if not set
             setCloseProtection(storedCloseProtection !== "false")
 
-            // Load AI provider settings
-            setProvider(localStorage.getItem(STORAGE_AI_PROVIDER_KEY) || "")
-            setBaseUrl(localStorage.getItem(STORAGE_AI_BASE_URL_KEY) || "")
-            setApiKey(localStorage.getItem(STORAGE_AI_API_KEY_KEY) || "")
-            setModelId(localStorage.getItem(STORAGE_AI_MODEL_KEY) || "")
-
             setError("")
         }
     }, [open])
+
+    const changeLanguage = (lang: string) => {
+        // Save locale to localStorage for persistence across restarts
+        localStorage.setItem("next-ai-draw-io-locale", lang)
+
+        const parts = pathname.split("/")
+        if (parts.length > 1 && i18n.locales.includes(parts[1] as Locale)) {
+            parts[1] = lang
+        } else {
+            parts.splice(1, 0, lang)
+        }
+        const newPath = parts.join("/") || "/"
+        const searchStr = search?.toString() ? `?${search.toString()}` : ""
+        router.push(newPath + searchStr)
+    }
 
     const handleSave = async () => {
         if (!accessCodeRequired) return
@@ -121,12 +175,15 @@ export function SettingsDialog({
         setIsVerifying(true)
 
         try {
-            const response = await fetch("/api/verify-access-code", {
-                method: "POST",
-                headers: {
-                    "x-access-code": accessCode.trim(),
+            const response = await fetch(
+                getApiEndpoint("/api/verify-access-code"),
+                {
+                    method: "POST",
+                    headers: {
+                        "x-access-code": accessCode.trim(),
+                    },
                 },
-            })
+            )
 
             const data = await response.json()
 
@@ -152,20 +209,32 @@ export function SettingsDialog({
     }
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>{dict.settings.title}</DialogTitle>
-                    <DialogDescription>
-                        {dict.settings.description}
-                    </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-2">
+        <DialogContent className="sm:max-w-lg p-0 gap-0">
+            {/* Header */}
+            <DialogHeader className="px-6 pt-6 pb-4">
+                <DialogTitle>{dict.settings.title}</DialogTitle>
+                <DialogDescription className="mt-1">
+                    {dict.settings.description}
+                </DialogDescription>
+            </DialogHeader>
+
+            {/* Content */}
+            <div className="px-6 pb-6">
+                <div className="divide-y divide-border-subtle">
+                    {/* Access Code (conditional) */}
                     {accessCodeRequired && (
-                        <div className="space-y-2">
-                            <Label htmlFor="access-code">
-                                {dict.settings.accessCode}
-                            </Label>
+                        <div className="py-4 first:pt-0 space-y-3">
+                            <div className="space-y-0.5">
+                                <Label
+                                    htmlFor="access-code"
+                                    className="text-sm font-medium"
+                                >
+                                    {dict.settings.accessCode}
+                                </Label>
+                                <p className="text-xs text-muted-foreground">
+                                    {dict.settings.accessCodeDescription}
+                                </p>
+                            </div>
                             <div className="flex gap-2">
                                 <Input
                                     id="access-code"
@@ -179,222 +248,60 @@ export function SettingsDialog({
                                         dict.settings.accessCodePlaceholder
                                     }
                                     autoComplete="off"
+                                    className="h-9"
                                 />
                                 <Button
                                     onClick={handleSave}
                                     disabled={isVerifying || !accessCode.trim()}
+                                    className="h-9 px-4 rounded-xl"
                                 >
                                     {isVerifying ? "..." : dict.common.save}
                                 </Button>
                             </div>
-                            <p className="text-[0.8rem] text-muted-foreground">
-                                {dict.settings.accessCodeDescription}
-                            </p>
                             {error && (
-                                <p className="text-[0.8rem] text-destructive">
+                                <p className="text-xs text-destructive">
                                     {error}
                                 </p>
                             )}
                         </div>
                     )}
-                    <div className="space-y-2">
-                        <Label>{dict.settings.aiProvider}</Label>
-                        <p className="text-[0.8rem] text-muted-foreground">
-                            {dict.settings.aiProviderDescription}
-                        </p>
-                        <div className="space-y-3 pt-2">
-                            <div className="space-y-2">
-                                <Label htmlFor="ai-provider">
-                                    {dict.settings.provider}
-                                </Label>
-                                <Select
-                                    value={provider || "default"}
-                                    onValueChange={(value) => {
-                                        const actualValue =
-                                            value === "default" ? "" : value
-                                        setProvider(actualValue)
-                                        localStorage.setItem(
-                                            STORAGE_AI_PROVIDER_KEY,
-                                            actualValue,
-                                        )
-                                    }}
-                                >
-                                    <SelectTrigger id="ai-provider">
-                                        <SelectValue
-                                            placeholder={
-                                                dict.settings.useServerDefault
-                                            }
-                                        />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="default">
-                                            {dict.settings.useServerDefault}
-                                        </SelectItem>
-                                        <SelectItem value="openai">
-                                            {dict.providers.openai}
-                                        </SelectItem>
-                                        <SelectItem value="anthropic">
-                                            {dict.providers.anthropic}
-                                        </SelectItem>
-                                        <SelectItem value="google">
-                                            {dict.providers.google}
-                                        </SelectItem>
-                                        <SelectItem value="azure">
-                                            {dict.providers.azure}
-                                        </SelectItem>
-                                        <SelectItem value="openrouter">
-                                            {dict.providers.openrouter}
-                                        </SelectItem>
-                                        <SelectItem value="deepseek">
-                                            {dict.providers.deepseek}
-                                        </SelectItem>
-                                        <SelectItem value="siliconflow">
-                                            {dict.providers.siliconflow}
-                                        </SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            {provider && provider !== "default" && (
-                                <>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ai-model">
-                                            {dict.settings.modelId}
-                                        </Label>
-                                        <Input
-                                            id="ai-model"
-                                            value={modelId}
-                                            onChange={(e) => {
-                                                setModelId(e.target.value)
-                                                localStorage.setItem(
-                                                    STORAGE_AI_MODEL_KEY,
-                                                    e.target.value,
-                                                )
-                                            }}
-                                            placeholder={
-                                                provider === "openai"
-                                                    ? "e.g., gpt-4o"
-                                                    : provider === "anthropic"
-                                                      ? "e.g., claude-sonnet-4-5"
-                                                      : provider === "google"
-                                                        ? "e.g., gemini-2.0-flash-exp"
-                                                        : provider ===
-                                                            "deepseek"
-                                                          ? "e.g., deepseek-chat"
-                                                          : dict.settings
-                                                                .modelId
-                                            }
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ai-api-key">
-                                            {dict.settings.apiKey}
-                                        </Label>
-                                        <Input
-                                            id="ai-api-key"
-                                            type="password"
-                                            value={apiKey}
-                                            onChange={(e) => {
-                                                setApiKey(e.target.value)
-                                                localStorage.setItem(
-                                                    STORAGE_AI_API_KEY_KEY,
-                                                    e.target.value,
-                                                )
-                                            }}
-                                            placeholder={
-                                                dict.settings.apiKeyPlaceholder
-                                            }
-                                            autoComplete="off"
-                                        />
-                                        <p className="text-[0.8rem] text-muted-foreground">
-                                            {dict.settings.overrides}{" "}
-                                            {provider === "openai"
-                                                ? "OPENAI_API_KEY"
-                                                : provider === "anthropic"
-                                                  ? "ANTHROPIC_API_KEY"
-                                                  : provider === "google"
-                                                    ? "GOOGLE_GENERATIVE_AI_API_KEY"
-                                                    : provider === "azure"
-                                                      ? "AZURE_API_KEY"
-                                                      : provider ===
-                                                          "openrouter"
-                                                        ? "OPENROUTER_API_KEY"
-                                                        : provider ===
-                                                            "deepseek"
-                                                          ? "DEEPSEEK_API_KEY"
-                                                          : provider ===
-                                                              "siliconflow"
-                                                            ? "SILICONFLOW_API_KEY"
-                                                            : "server API key"}
-                                        </p>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="ai-base-url">
-                                            {dict.settings.baseUrl}
-                                        </Label>
-                                        <Input
-                                            id="ai-base-url"
-                                            value={baseUrl}
-                                            onChange={(e) => {
-                                                setBaseUrl(e.target.value)
-                                                localStorage.setItem(
-                                                    STORAGE_AI_BASE_URL_KEY,
-                                                    e.target.value,
-                                                )
-                                            }}
-                                            placeholder={
-                                                provider === "anthropic"
-                                                    ? "https://api.anthropic.com/v1"
-                                                    : provider === "siliconflow"
-                                                      ? "https://api.siliconflow.com/v1"
-                                                      : dict.settings
-                                                            .customEndpoint
-                                            }
-                                        />
-                                    </div>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="w-full"
-                                        onClick={() => {
-                                            localStorage.removeItem(
-                                                STORAGE_AI_PROVIDER_KEY,
-                                            )
-                                            localStorage.removeItem(
-                                                STORAGE_AI_BASE_URL_KEY,
-                                            )
-                                            localStorage.removeItem(
-                                                STORAGE_AI_API_KEY_KEY,
-                                            )
-                                            localStorage.removeItem(
-                                                STORAGE_AI_MODEL_KEY,
-                                            )
-                                            setProvider("")
-                                            setBaseUrl("")
-                                            setApiKey("")
-                                            setModelId("")
-                                        }}
-                                    >
-                                        {dict.settings.clearSettings}
-                                    </Button>
-                                </>
-                            )}
-                        </div>
-                    </div>
 
-                    <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                            <Label htmlFor="theme-toggle">
-                                {dict.settings.theme}
-                            </Label>
-                            <p className="text-[0.8rem] text-muted-foreground">
-                                {dict.settings.themeDescription}
-                            </p>
-                        </div>
+                    {/* Language */}
+                    <SettingItem
+                        label={dict.settings.language}
+                        description={dict.settings.languageDescription}
+                    >
+                        <Select
+                            value={currentLang}
+                            onValueChange={changeLanguage}
+                        >
+                            <SelectTrigger
+                                id="language-select"
+                                className="w-[120px] h-9 rounded-xl"
+                            >
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {i18n.locales.map((locale) => (
+                                    <SelectItem key={locale} value={locale}>
+                                        {LANGUAGE_LABELS[locale]}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </SettingItem>
+
+                    {/* Theme */}
+                    <SettingItem
+                        label={dict.settings.theme}
+                        description={dict.settings.themeDescription}
+                    >
                         <Button
                             id="theme-toggle"
                             variant="outline"
                             size="icon"
                             onClick={onToggleDarkMode}
+                            className="h-9 w-9 rounded-xl border-border-subtle hover:bg-interactive-hover"
                         >
                             {darkMode ? (
                                 <Sun className="h-4 w-4" />
@@ -402,42 +309,35 @@ export function SettingsDialog({
                                 <Moon className="h-4 w-4" />
                             )}
                         </Button>
-                    </div>
+                    </SettingItem>
 
-                    <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                            <Label htmlFor="drawio-ui">
-                                {dict.settings.drawioStyle}
-                            </Label>
-                            <p className="text-[0.8rem] text-muted-foreground">
-                                {dict.settings.drawioStyleDescription}{" "}
-                                {drawioUi === "min"
-                                    ? dict.settings.minimal
-                                    : dict.settings.sketch}
-                            </p>
-                        </div>
+                    {/* Draw.io Style */}
+                    <SettingItem
+                        label={dict.settings.drawioStyle}
+                        description={`${dict.settings.drawioStyleDescription} ${
+                            drawioUi === "min"
+                                ? dict.settings.minimal
+                                : dict.settings.sketch
+                        }`}
+                    >
                         <Button
                             id="drawio-ui"
                             variant="outline"
-                            size="sm"
                             onClick={onToggleDrawioUi}
+                            className="h-9 w-[120px] rounded-xl border-border-subtle hover:bg-interactive-hover font-normal"
                         >
                             {dict.settings.switchTo}{" "}
                             {drawioUi === "min"
                                 ? dict.settings.sketch
                                 : dict.settings.minimal}
                         </Button>
-                    </div>
+                    </SettingItem>
 
-                    <div className="flex items-center justify-between">
-                        <div className="space-y-0.5">
-                            <Label htmlFor="close-protection">
-                                {dict.settings.closeProtection}
-                            </Label>
-                            <p className="text-[0.8rem] text-muted-foreground">
-                                {dict.settings.closeProtectionDescription}
-                            </p>
-                        </div>
+                    {/* Close Protection */}
+                    <SettingItem
+                        label={dict.settings.closeProtection}
+                        description={dict.settings.closeProtectionDescription}
+                    >
                         <Switch
                             id="close-protection"
                             checked={closeProtection}
@@ -450,14 +350,81 @@ export function SettingsDialog({
                                 onCloseProtectionChange?.(checked)
                             }}
                         />
-                    </div>
+                    </SettingItem>
+
+                    {/* Diagram Style */}
+                    <SettingItem
+                        label={dict.settings.diagramStyle}
+                        description={dict.settings.diagramStyleDescription}
+                    >
+                        <div className="flex items-center gap-2">
+                            <Switch
+                                id="minimal-style"
+                                checked={minimalStyle}
+                                onCheckedChange={onMinimalStyleChange}
+                            />
+                            <span className="text-sm text-muted-foreground">
+                                {minimalStyle
+                                    ? dict.chat.minimalStyle
+                                    : dict.chat.styledMode}
+                            </span>
+                        </div>
+                    </SettingItem>
                 </div>
-                <div className="pt-4 border-t border-border/50">
-                    <p className="text-[0.75rem] text-muted-foreground text-center">
-                        Version {process.env.APP_VERSION}
-                    </p>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 border-t border-border-subtle bg-surface-1/50 rounded-b-2xl">
+                <div className="flex items-center justify-center gap-3">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Tag className="h-3 w-3" />
+                        {process.env.APP_VERSION}
+                    </span>
+                    <span className="text-muted-foreground">·</span>
+                    <a
+                        href="https://github.com/DayuanJiang/next-ai-draw-io"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                    >
+                        <Github className="h-3 w-3" />
+                        GitHub
+                    </a>
+                    {process.env.NEXT_PUBLIC_SHOW_ABOUT_AND_NOTICE ===
+                        "true" && (
+                        <>
+                            <span className="text-muted-foreground">·</span>
+                            <a
+                                href={`/${currentLang}/about${currentLang === "zh" ? "/cn" : currentLang === "ja" ? "/ja" : ""}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                            >
+                                <Info className="h-3 w-3" />
+                                {dict.nav.about}
+                            </a>
+                        </>
+                    )}
                 </div>
-            </DialogContent>
+            </div>
+        </DialogContent>
+    )
+}
+
+export function SettingsDialog(props: SettingsDialogProps) {
+    return (
+        <Dialog open={props.open} onOpenChange={props.onOpenChange}>
+            <Suspense
+                fallback={
+                    <DialogContent className="sm:max-w-lg p-0">
+                        <div className="h-80 flex items-center justify-center">
+                            <div className="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full" />
+                        </div>
+                    </DialogContent>
+                }
+            >
+                <SettingsContent {...props} />
+            </Suspense>
         </Dialog>
     )
 }
