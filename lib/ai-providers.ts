@@ -402,6 +402,20 @@ function detectProvider(): ProviderName | null {
  */
 function validateProviderCredentials(provider: ProviderName): void {
     const requiredVar = PROVIDER_ENV_VARS[provider]
+
+    // Anthropic supports either API key or auth token
+    if (provider === "anthropic") {
+        const hasApiKey = !!process.env.ANTHROPIC_API_KEY
+        const hasAuthToken = !!process.env.ANTHROPIC_AUTH_TOKEN
+        if (!hasApiKey && !hasAuthToken) {
+            throw new Error(
+                `Anthropic requires either ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN to be set. ` +
+                    `Please set one in your .env.local file.`,
+            )
+        }
+        return
+    }
+
     if (requiredVar && !process.env[requiredVar]) {
         throw new Error(
             `${requiredVar} environment variable is required for ${provider} provider. ` +
@@ -575,19 +589,33 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
         }
 
         case "anthropic": {
+            const authToken = process.env.ANTHROPIC_AUTH_TOKEN
             const apiKey = overrides?.apiKey || process.env.ANTHROPIC_API_KEY
-            const baseURL =
-                overrides?.baseUrl ||
-                process.env.ANTHROPIC_BASE_URL ||
-                "https://api.anthropic.com/v1"
+            const baseURL = overrides?.baseUrl || process.env.ANTHROPIC_BASE_URL
+
+            // Build headers: beta features + optional Authorization token
+            const anthropicHeaders: Record<string, string> = {
+                ...ANTHROPIC_BETA_HEADERS,
+            }
+
+            // Determine which auth method to use
+            const useAuthToken = authToken && !overrides?.apiKey
+
+            // If auth token is provided, use Authorization header instead of x-api-key
+            if (useAuthToken) {
+                anthropicHeaders["Authorization"] = `Bearer ${authToken}`
+            }
+
             const customProvider = createAnthropic({
-                apiKey,
-                baseURL,
-                headers: ANTHROPIC_BETA_HEADERS,
+                // SDK requires apiKey param, use placeholder when using auth token
+                // The actual auth is handled via Authorization header
+                apiKey: useAuthToken ? "placeholder-using-auth-header" : apiKey,
+                ...(baseURL && { baseURL }),
+                headers: anthropicHeaders,
             })
             model = customProvider(modelId)
-            // Add beta headers for fine-grained tool streaming
-            headers = ANTHROPIC_BETA_HEADERS
+            // Add headers for fine-grained tool streaming
+            headers = anthropicHeaders
             break
         }
 
