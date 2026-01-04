@@ -6,6 +6,7 @@ import {
     MessageSquarePlus,
     PanelRightClose,
     PanelRightOpen,
+    Save,
     Settings,
 } from "lucide-react"
 import Image from "next/image"
@@ -27,6 +28,7 @@ import { SettingsDialog } from "@/components/settings-dialog"
 import { useDiagram } from "@/contexts/diagram-context"
 import { useDiagramToolHandlers } from "@/hooks/use-diagram-tool-handlers"
 import { useDictionary } from "@/hooks/use-dictionary"
+import { useEmbedChatHistory } from "@/hooks/use-embed-chat-history"
 import { getSelectedAIConfig, useModelConfig } from "@/hooks/use-model-config"
 import { useSessionManager } from "@/hooks/use-session-manager"
 import { getApiEndpoint } from "@/lib/base-path"
@@ -70,6 +72,14 @@ interface ChatPanelProps {
     onToggleDarkMode: () => void
     isMobile?: boolean
     onCloseProtectionChange?: (enabled: boolean) => void
+    /** Whether running in embed mode (inside iframe) */
+    isEmbedMode?: boolean
+    /** Callback to save diagram to parent window */
+    onSaveToParent?: () => Promise<void>
+    /** Initial chat history (JSON) from parent in embed mode */
+    initialChatHistory?: string
+    /** Callback to register getChatHistory function for export */
+    onChatHistoryExport?: (fn: () => string) => void
 }
 
 // Constants for tool states
@@ -111,6 +121,10 @@ export default function ChatPanel({
     onToggleDarkMode,
     isMobile = false,
     onCloseProtectionChange,
+    isEmbedMode = false,
+    onSaveToParent,
+    initialChatHistory,
+    onChatHistoryExport,
 }: ChatPanelProps) {
     const {
         loadDiagram: onDisplayChart,
@@ -430,6 +444,28 @@ export default function ChatPanel({
     useEffect(() => {
         messagesRef.current = messages
     }, [messages])
+
+    // Handle embed mode chat history loading (async via postMessage)
+    const { resetLoadedHistory } = useEmbedChatHistory({
+        isEmbedMode,
+        initialChatHistory,
+        setMessages,
+        xmlSnapshotsRef,
+    })
+
+    // Register getChatHistory callback for embed mode export
+    useEffect(() => {
+        if (!isEmbedMode || !onChatHistoryExport) return
+
+        // Register the callback that returns serialized chat history
+        onChatHistoryExport(() => {
+            const chatHistory = {
+                messages: messagesRef.current,
+                xmlSnapshots: Array.from(xmlSnapshotsRef.current.entries()),
+            }
+            return JSON.stringify(chatHistory)
+        })
+    }, [isEmbedMode, onChatHistoryExport])
 
     // Track last synced session ID to detect external changes (e.g., URL back/forward)
     const lastSyncedSessionIdRef = useRef<string | null>(null)
@@ -859,11 +895,14 @@ export default function ChatPanel({
             .slice(2, 9)}`
         setSessionId(newSessionId)
         xmlSnapshotsRef.current.clear()
+        resetLoadedHistory() // Reset for embed mode to allow reloading
         sessionStorage.removeItem(SESSION_STORAGE_INPUT_KEY)
         toast.success(dict.dialogs.clearSuccess)
 
-        // Clear URL param to show blank state
-        router.replace(window.location.pathname, { scroll: false })
+        // Clear URL param to show blank state (skip in embed mode)
+        if (!isEmbedMode) {
+            router.replace(window.location.pathname, { scroll: false })
+        }
     }, [
         clearDiagram,
         handleFileChange,
@@ -875,6 +914,8 @@ export default function ChatPanel({
         dict.dialogs.clearSuccess,
         buildSessionData,
         setDiagramHistory,
+        resetLoadedHistory,
+        isEmbedMode,
     ])
 
     const handleInputChange = (
@@ -1176,6 +1217,24 @@ export default function ChatPanel({
                         </div>
                     </button>
                     <div className="flex items-center gap-1 justify-end overflow-visible">
+                        {/* Embed mode: Save & Close button */}
+                        {isEmbedMode && onSaveToParent && (
+                            <>
+                                <ButtonWithTooltip
+                                    tooltipContent="Save & Close"
+                                    variant="default"
+                                    size="sm"
+                                    onClick={onSaveToParent}
+                                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                                >
+                                    <Save
+                                        className={`${isMobile ? "h-4 w-4" : "h-4 w-4"} mr-1`}
+                                    />
+                                    Save
+                                </ButtonWithTooltip>
+                                <div className="w-px h-5 bg-border mx-1" />
+                            </>
+                        )}
                         <ButtonWithTooltip
                             tooltipContent={dict.nav.newChat}
                             variant="ghost"
