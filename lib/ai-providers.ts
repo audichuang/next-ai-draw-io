@@ -23,6 +23,7 @@ export type ProviderName =
     | "gateway"
     | "edgeone"
     | "doubao"
+    | "modelscope"
 
 interface ModelConfig {
     model: any
@@ -59,6 +60,7 @@ const ALLOWED_CLIENT_PROVIDERS: ProviderName[] = [
     "gateway",
     "edgeone",
     "doubao",
+    "modelscope",
 ]
 
 // Bedrock provider options for Anthropic beta features
@@ -353,6 +355,7 @@ function buildProviderOptions(
         case "siliconflow":
         case "sglang":
         case "gateway":
+        case "modelscope":
         case "doubao": {
             // These providers don't have reasoning configs in AI SDK yet
             // Gateway passes through to underlying providers which handle their own configs
@@ -381,6 +384,7 @@ const PROVIDER_ENV_VARS: Record<ProviderName, string | null> = {
     gateway: "AI_GATEWAY_API_KEY",
     edgeone: null, // No credentials needed - uses EdgeOne Edge AI
     doubao: "DOUBAO_API_KEY",
+    modelscope: "MODELSCOPE_API_KEY",
 }
 
 /**
@@ -459,7 +463,7 @@ function validateProviderCredentials(provider: ProviderName): void {
  * Get the AI model based on environment variables
  *
  * Environment variables:
- * - AI_PROVIDER: The provider to use (bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway)
+ * - AI_PROVIDER: The provider to use (bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway, modelscope)
  * - AI_MODEL: The model ID/name for the selected provider
  *
  * Provider-specific env vars:
@@ -477,6 +481,8 @@ function validateProviderCredentials(provider: ProviderName): void {
  * - SILICONFLOW_BASE_URL: SiliconFlow endpoint (optional, defaults to https://api.siliconflow.com/v1)
  * - SGLANG_API_KEY: SGLang API key
  * - SGLANG_BASE_URL: SGLang endpoint (optional)
+ * - MODELSCOPE_API_KEY: ModelScope API key
+ * - MODELSCOPE_BASE_URL: ModelScope endpoint (optional)
  */
 export function getAIModel(overrides?: ClientOverrides): ModelConfig {
     // SECURITY: Prevent SSRF attacks (GHSA-9qf7-mprq-9qgm)
@@ -551,6 +557,7 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
                         `- AZURE_API_KEY for Azure\n` +
                         `- SILICONFLOW_API_KEY for SiliconFlow\n` +
                         `- SGLANG_API_KEY for SGLang\n` +
+                        `- MODELSCOPE_API_KEY for ModelScope\n` +
                         `Or set AI_PROVIDER=ollama for local Ollama.`,
                 )
             } else {
@@ -587,8 +594,8 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
             const bedrockProvider = hasClientCredentials
                 ? createAmazonBedrock({
                       region: bedrockRegion,
-                      accessKeyId: overrides.awsAccessKeyId!,
-                      secretAccessKey: overrides.awsSecretAccessKey!,
+                      accessKeyId: overrides.awsAccessKeyId as string,
+                      secretAccessKey: overrides.awsSecretAccessKey as string,
                       ...(overrides?.awsSessionToken && {
                           sessionToken: overrides.awsSessionToken,
                       }),
@@ -899,17 +906,44 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
                 overrides?.baseUrl ||
                 process.env.DOUBAO_BASE_URL ||
                 "https://ark.cn-beijing.volces.com/api/v3"
-            const doubaoProvider = createDeepSeek({
+            const lowerModelId = modelId.toLowerCase()
+            // Use DeepSeek provider for DeepSeek/Kimi models, OpenAI for others (multimodal support)
+            if (
+                lowerModelId.includes("deepseek") ||
+                lowerModelId.includes("kimi")
+            ) {
+                const doubaoProvider = createDeepSeek({
+                    apiKey,
+                    baseURL,
+                })
+                model = doubaoProvider(modelId)
+            } else {
+                const doubaoProvider = createOpenAI({
+                    apiKey,
+                    baseURL,
+                })
+                model = doubaoProvider.chat(modelId)
+            }
+            break
+        }
+
+        case "modelscope": {
+            const apiKey = overrides?.apiKey || process.env.MODELSCOPE_API_KEY
+            const baseURL =
+                overrides?.baseUrl ||
+                process.env.MODELSCOPE_BASE_URL ||
+                "https://api-inference.modelscope.cn/v1"
+            const modelscopeProvider = createOpenAI({
                 apiKey,
                 baseURL,
             })
-            model = doubaoProvider(modelId)
+            model = modelscopeProvider.chat(modelId)
             break
         }
 
         default:
             throw new Error(
-                `Unknown AI provider: ${provider}. Supported providers: bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway, edgeone, doubao`,
+                `Unknown AI provider: ${provider}. Supported providers: bedrock, openai, anthropic, google, azure, ollama, openrouter, deepseek, siliconflow, sglang, gateway, edgeone, doubao, modelscope`,
             )
     }
 
