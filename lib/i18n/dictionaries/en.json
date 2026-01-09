@@ -18,7 +18,8 @@
         "settings": "Settings",
         "hidePanel": "Hide chat panel (Ctrl+B)",
         "showPanel": "Show chat panel (Ctrl+B)",
-        "aiChat": "AI Chat"
+        "aiChat": "AI Chat",
+        "copyDiagram": "Copy diagram as image"
     },
     "providers": {
         "useServerDefault": "Use Server Default",
@@ -133,7 +134,9 @@
         "clearTitle": "Clear Everything?",
         "clearDescription": "This will clear the current conversation and reset the diagram. This action cannot be undone.",
         "clearEverything": "Clear Everything",
-        "clearSuccess": "Started a fresh chat"
+        "clearSuccess": "Started a fresh chat",
+        "copySuccess": "Diagram copied to clipboard",
+        "copyFailed": "Failed to copy diagram"
     },
     "errors": {
         "maxFiles": "Too many files. Maximum {max} allowed.",

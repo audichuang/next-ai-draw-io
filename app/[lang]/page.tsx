@@ -240,7 +240,7 @@ export default function Home() {
                                             noSaveBtn: true,
                                             noExitBtn: true,
                                             dark: darkMode,
-                                            lang: currentLang,
+                                            lang: currentLang.toLowerCase(), // draw.io uses lowercase (e.g., 'zh-tw' instead of 'zh-TW')
                                         }}
                                     />
                                 </div>

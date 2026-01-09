@@ -52,7 +52,8 @@ function SettingItem({
 
 const LANGUAGE_LABELS: Record<Locale, string> = {
     en: "English",
-    zh: "中文",
+    zh: "简体中文",
+    "zh-TW": "繁體中文",
     ja: "日本語",
 }
 

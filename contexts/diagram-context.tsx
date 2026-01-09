@@ -36,6 +36,7 @@ interface DiagramContextType {
         successMessage?: string,
     ) => void
     getThumbnailSvg: () => Promise<string | null>
+    copyDiagramToClipboard: () => Promise<boolean>
     isDrawioReady: boolean
     onDrawioLoad: () => void
     resetDrawioReady: () => void
@@ -134,6 +135,9 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         resolver: ((data: string) => void) | null
         format: ExportFormat | null
     }>({ resolver: null, format: null })
+
+    // Track if we're expecting an export for clipboard copy
+    const copyResolverRef = useRef<((data: string) => void) | null>(null)
 
     const handleExport = () => {
         if (drawioRef.current) {
@@ -249,6 +253,13 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
             }
         }
 
+        // Handle copy to clipboard if requested
+        if (copyResolverRef.current) {
+            copyResolverRef.current(data.data)
+            copyResolverRef.current = null
+            return
+        }
+
         const extractedXML = extractDiagramXML(data.data)
         console.log(
             "[NextAI context] Extracted XML length:",
@@ -295,6 +306,52 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     const saveDiagramToStorage = () => {
         if (chartXML && chartXML.length > 300) {
             localStorage.setItem(STORAGE_DIAGRAM_XML_KEY, chartXML)
+        }
+    }
+
+    // Copy diagram to clipboard as high-resolution PNG image
+    const copyDiagramToClipboard = async (): Promise<boolean> => {
+        if (!drawioRef.current) {
+            console.warn("[copyDiagramToClipboard] Draw.io editor not ready")
+            return false
+        }
+
+        // Don't copy if diagram is empty
+        if (!isRealDiagram(chartXML)) {
+            console.warn("[copyDiagramToClipboard] No diagram to copy")
+            return false
+        }
+
+        try {
+            // Export diagram as PNG (scale: 2 = 2x for Retina displays)
+            const pngData = await Promise.race([
+                new Promise<string>((resolve) => {
+                    copyResolverRef.current = resolve
+                    drawioRef.current?.exportDiagram({
+                        format: "png",
+                        scale: 2,
+                    })
+                }),
+                new Promise<string>((_, reject) =>
+                    setTimeout(() => reject(new Error("Export timeout")), 5000),
+                ),
+            ])
+
+            // Convert data URL to blob
+            const response = await fetch(pngData)
+            const blob = await response.blob()
+
+            // Copy to clipboard using Clipboard API
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    [blob.type]: blob,
+                }),
+            ])
+
+            return true
+        } catch (error) {
+            console.error("[copyDiagramToClipboard] Failed to copy:", error)
+            return false
         }
     }
 
@@ -418,6 +475,7 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
                 clearDiagram,
                 saveDiagramToFile,
                 getThumbnailSvg,
+                copyDiagramToClipboard,
                 isDrawioReady,
                 onDrawioLoad,
                 resetDrawioReady,

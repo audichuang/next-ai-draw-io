@@ -41,18 +41,23 @@ export async function generateMetadata({
     params: Promise<{ lang: string }>
 }): Promise<Metadata> {
     const { lang: rawLang } = await params
-    const lang = (rawLang in { en: 1, zh: 1, ja: 1 } ? rawLang : "en") as Locale
+    const lang = (
+        rawLang in { en: 1, zh: 1, "zh-TW": 1, ja: 1 } ? rawLang : "en"
+    ) as Locale
 
     // Default to English metadata
     const titles: Record<Locale, string> = {
         en: "Next AI Draw.io - AI-Powered Diagram Generator",
         zh: "Next AI Draw.io - AI powered diagram generator",
+        "zh-TW": "Next AI Draw.io - AI 智能圖表生成器",
         ja: "Next AI Draw.io - AI-powered diagram generator",
     }
 
     const descriptions: Record<Locale, string> = {
         en: "Create AWS architecture diagrams, flowcharts, and technical diagrams using AI. Free online tool integrating draw.io with AI assistance for professional diagram creation.",
         zh: "Use AI to create AWS architecture diagrams, flowcharts, and technical diagrams. Free online tool integrated with draw.io and AI assistance for professional diagram creation.",
+        "zh-TW":
+            "使用 AI 創建 AWS 架構圖、流程圖和技術圖表。整合 draw.io 的免費線上工具，搭配 AI 助理進行專業圖表創作。",
         ja: "Create AWS architecture diagrams, flowcharts, and technical diagrams using AI. Create professional diagrams with a free online tool that integrates draw.io with an AI assistant.",
     }
 
@@ -80,7 +85,14 @@ export async function generateMetadata({
             type: "website",
             url: "https://next-ai-drawio.jiang.jp",
             siteName: "Next AI Draw.io",
-            locale: lang === "zh" ? "zh_CN" : lang === "ja" ? "ja_JP" : "en_US",
+            locale:
+                lang === "zh"
+                    ? "zh_CN"
+                    : lang === "zh-TW"
+                      ? "zh_TW"
+                      : lang === "ja"
+                        ? "ja_JP"
+                        : "en_US",
             images: [
                 {
                     url: "/architecture.png",
@@ -114,6 +126,7 @@ export async function generateMetadata({
             languages: {
                 en: "/en",
                 zh: "/zh",
+                "zh-TW": "/zh-TW",
                 ja: "/ja",
             },
         },

@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
 import {
+    Copy,
     MessageSquarePlus,
     PanelRightClose,
     PanelRightOpen,
@@ -138,6 +139,7 @@ export default function ChatPanel({
         getThumbnailSvg,
         diagramHistory,
         setDiagramHistory,
+        copyDiagramToClipboard,
     } = useDiagram()
 
     const dict = useDictionary()
@@ -1252,6 +1254,28 @@ export default function ChatPanel({
                                 <div className="w-px h-5 bg-border mx-1" />
                             </>
                         )}
+                        <ButtonWithTooltip
+                            tooltipContent={dict.nav.copyDiagram}
+                            variant="ghost"
+                            size="icon"
+                            onClick={async () => {
+                                const success = await copyDiagramToClipboard()
+                                if (success) {
+                                    toast.success(dict.dialogs.copySuccess)
+                                } else {
+                                    toast.error(dict.dialogs.copyFailed)
+                                }
+                            }}
+                            disabled={
+                                status === "streaming" || status === "submitted"
+                            }
+                            className="hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                            data-testid="copy-diagram-button"
+                        >
+                            <Copy
+                                className={`${isMobile ? "h-4 w-4" : "h-5 w-5"} text-muted-foreground`}
+                            />
+                        </ButtonWithTooltip>
                         <ButtonWithTooltip
                             tooltipContent={dict.nav.newChat}
                             variant="ghost"

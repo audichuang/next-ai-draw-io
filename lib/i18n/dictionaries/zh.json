@@ -18,7 +18,8 @@
         "settings": "设置",
         "hidePanel": "隐藏聊天面板 (Ctrl+B)",
         "showPanel": "显示聊天面板 (Ctrl+B)",
-        "aiChat": "AI 聊天"
+        "aiChat": "AI 聊天",
+        "copyDiagram": "复制图表为图片"
     },
     "providers": {
         "useServerDefault": "使用服务器默认值",
@@ -133,7 +134,9 @@
         "clearTitle": "清除所有内容？",
         "clearDescription": "这将清除当前对话并重置图表。此操作无法撤消。",
         "clearEverything": "清除所有内容",
-        "clearSuccess": "已开始新对话"
+        "clearSuccess": "已开始新对话",
+        "copySuccess": "图表已复制到剪贴板",
+        "copyFailed": "复制图表失败"
     },
     "errors": {
         "maxFiles": "文件太多。最多允许 {max} 个。",
