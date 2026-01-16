@@ -147,13 +147,17 @@ export default function ChatPanel({
     const searchParams = useSearchParams()
     const urlSessionId = searchParams.get("session")
 
+    // Fetch current chart XML. saveToHistory=true only for first message to save initial state
     const onFetchChart = (saveToHistory = true) => {
+        // Only save to history if this is the first message (saves initial/blank state as version 1)
+        // Subsequent saves are handled by display_diagram/edit_diagram/append_diagram success
+        const shouldSaveHistory = saveToHistory && messages.length === 0
         return Promise.race([
             new Promise<string>((resolve) => {
                 if (resolverRef && "current" in resolverRef) {
                     resolverRef.current = resolve
                 }
-                if (saveToHistory) {
+                if (shouldSaveHistory) {
                     onExport()
                 } else {
                     handleExportWithoutHistory()
@@ -294,7 +298,6 @@ export default function ChatPanel({
         chartXMLRef,
         onDisplayChart,
         onFetchChart,
-        onExport,
     })
 
     const { messages, sendMessage, addToolOutput, status, error, setMessages } =
@@ -1104,6 +1107,19 @@ export default function ChatPanel({
         // Clean up snapshots for messages after the user message (they will be removed)
         cleanupSnapshotsAfter(userMessageIndex)
 
+        // Calculate how many history entries to keep
+        // History structure: [initial state] + [one per assistant message with diagram tool]
+        // After regenerate, we remove from userMessageIndex onwards, so count assistant messages before that
+        const messagesBeforeRegenerate = messages.slice(0, userMessageIndex)
+        const assistantCountBefore = messagesBeforeRegenerate.filter(
+            (m) => m.role === "assistant",
+        ).length
+        // Keep initial state + entries for assistant messages before this point
+        const historyToKeep = assistantCountBefore + 1
+        if (diagramHistory.length > historyToKeep) {
+            setDiagramHistory(diagramHistory.slice(0, historyToKeep))
+        }
+
         // Remove the user message AND assistant message onwards (sendMessage will re-add the user message)
         // Use flushSync to ensure state update is processed synchronously before sending
         const newMessages = messages.slice(0, userMessageIndex)
@@ -1138,6 +1154,19 @@ export default function ChatPanel({
 
         // Clean up snapshots for messages after the user message (they will be removed)
         cleanupSnapshotsAfter(messageIndex)
+
+        // Calculate how many history entries to keep
+        // History structure: [initial state] + [one per assistant message with diagram tool]
+        // After edit, we remove from messageIndex onwards, so count assistant messages before that
+        const messagesBeforeEdit = messages.slice(0, messageIndex)
+        const assistantCountBefore = messagesBeforeEdit.filter(
+            (m) => m.role === "assistant",
+        ).length
+        // Keep initial state + entries for assistant messages before this point
+        const historyToKeep = assistantCountBefore + 1
+        if (diagramHistory.length > historyToKeep) {
+            setDiagramHistory(diagramHistory.slice(0, historyToKeep))
+        }
 
         // Create new parts with updated text
         const newParts = message.parts?.map((part: any) => {

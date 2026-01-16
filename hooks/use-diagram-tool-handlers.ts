@@ -39,9 +39,12 @@ interface UseDiagramToolHandlersParams {
     partialXmlRef: MutableRefObject<string>
     editDiagramOriginalXmlRef: MutableRefObject<Map<string, string>>
     chartXMLRef: MutableRefObject<string>
-    onDisplayChart: (xml: string, skipValidation?: boolean) => string | null
+    onDisplayChart: (
+        xml: string,
+        skipValidation?: boolean,
+        saveToHistory?: boolean,
+    ) => string | null
     onFetchChart: (saveToHistory?: boolean) => Promise<string>
-    onExport: () => void
 }
 
 /**
@@ -57,7 +60,6 @@ export function useDiagramToolHandlers({
     chartXMLRef,
     onDisplayChart,
     onFetchChart,
-    onExport,
 }: UseDiagramToolHandlersParams) {
     const handleToolCall = async (
         { toolCall }: { toolCall: ToolCall },
@@ -133,7 +135,8 @@ NEXT STEP: Call append_diagram with the continuation XML.
         const fullXml = wrapWithMxFile(finalXml)
 
         // loadDiagram validates and returns error if invalid
-        const validationError = onDisplayChart(fullXml)
+        // Pass saveToHistory=true to save diagram to history after loading
+        const validationError = onDisplayChart(fullXml, false, true)
 
         if (validationError) {
             console.warn("[display_diagram] Validation error:", validationError)
@@ -158,6 +161,7 @@ ${finalXml}
             })
         } else {
             // Success - diagram will be rendered by chat-message-display
+            // History will be saved automatically by loadDiagram with saveToHistory=true
             if (DEBUG) {
                 console.log(
                     "[display_diagram] Success! Adding tool output with state: output-available",
@@ -238,7 +242,8 @@ Please check the cell IDs and retry.`,
             }
 
             // loadDiagram validates and returns error if invalid
-            const validationError = onDisplayChart(editedXml)
+            // Pass saveToHistory=true to save diagram to history after loading
+            const validationError = onDisplayChart(editedXml, false, true)
             if (validationError) {
                 console.warn(
                     "[edit_diagram] Validation error:",
@@ -261,7 +266,7 @@ Please fix the operations to avoid structural issues.`,
                 editDiagramOriginalXmlRef.current.delete(toolCall.toolCallId)
                 return
             }
-            onExport()
+            // History will be saved automatically by loadDiagram with saveToHistory=true
             addToolOutput({
                 tool: "edit_diagram",
                 toolCallId: toolCall.toolCallId,
@@ -338,7 +343,8 @@ Start your continuation with the NEXT character after where it stopped.`,
             partialXmlRef.current = "" // Reset
 
             const fullXml = wrapWithMxFile(finalXml)
-            const validationError = onDisplayChart(fullXml)
+            // Pass saveToHistory=true to save diagram to history after loading
+            const validationError = onDisplayChart(fullXml, false, true)
 
             if (validationError) {
                 addToolOutput({
@@ -360,6 +366,7 @@ Please use display_diagram with corrected XML.`,
                     toolCallId: toolCall.toolCallId,
                     output: "Diagram assembly complete and displayed successfully.",
                 })
+                // History will be saved automatically by loadDiagram with saveToHistory=true
             }
         } else {
             // Still incomplete - signal to continue

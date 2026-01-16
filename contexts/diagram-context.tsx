@@ -22,7 +22,11 @@ interface DiagramContextType {
     exportCounter: number // Counter to force useEffect trigger
     diagramHistory: { svg: string; xml: string }[]
     setDiagramHistory: (history: { svg: string; xml: string }[]) => void
-    loadDiagram: (chart: string, skipValidation?: boolean) => string | null
+    loadDiagram: (
+        chart: string,
+        skipValidation?: boolean,
+        saveToHistory?: boolean,
+    ) => string | null
     handleExport: () => void
     handleExportWithoutHistory: () => void
     resolverRef: React.Ref<((value: string) => void) | null>
@@ -200,6 +204,7 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     const loadDiagram = (
         chart: string,
         skipValidation?: boolean,
+        saveToHistory?: boolean,
     ): string | null => {
         let xmlToLoad = chart
 
@@ -230,6 +235,15 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
             drawioRef.current.load({
                 xml: xmlToLoad,
             })
+
+            // If saveToHistory is requested, trigger export after a short delay
+            // to allow draw.io to finish rendering the loaded diagram
+            if (saveToHistory) {
+                setTimeout(() => {
+                    expectHistoryExportRef.current = true
+                    drawioRef.current?.exportDiagram({ format: "xmlsvg" })
+                }, 500) // 500ms should be enough for draw.io to render
+            }
         }
 
         return null

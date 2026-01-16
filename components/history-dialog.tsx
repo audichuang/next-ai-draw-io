@@ -14,6 +14,7 @@ import {
 import { useDiagram } from "@/contexts/diagram-context"
 import { useDictionary } from "@/hooks/use-dictionary"
 import { formatMessage } from "@/lib/i18n/utils"
+import { isRealDiagram } from "@/lib/utils"
 
 interface HistoryDialogProps {
     showHistory: boolean
@@ -25,7 +26,13 @@ export function HistoryDialog({
     onToggleHistory,
 }: HistoryDialogProps) {
     const dict = useDictionary()
-    const { loadDiagram: onDisplayChart, diagramHistory } = useDiagram()
+    const {
+        loadDiagram: onDisplayChart,
+        diagramHistory,
+        setDiagramHistory,
+        chartXML,
+        latestSvg,
+    } = useDiagram()
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
 
     const handleClose = () => {
@@ -35,6 +42,14 @@ export function HistoryDialog({
 
     const handleConfirmRestore = () => {
         if (selectedIndex !== null) {
+            // Save current diagram to history before restoring (so user can go back)
+            // Only save if there's a real diagram on canvas
+            if (isRealDiagram(chartXML) && latestSvg) {
+                setDiagramHistory([
+                    ...diagramHistory,
+                    { svg: latestSvg, xml: chartXML },
+                ])
+            }
             // Skip validation for trusted history snapshots
             onDisplayChart(diagramHistory[selectedIndex].xml, true)
             handleClose()
