@@ -4,13 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
     type ChatSession,
     createEmptySession,
-    deleteSession as deleteSessionFromDB,
-    enforceSessionLimit,
+    createFolder as createFolderAPI,
+    deleteFolder as deleteFolderAPI,
+    deleteSession as deleteSessionFromAPI,
     extractTitle,
+    // Folder imports
+    type FolderMetadata,
+    getAllFolders,
     getAllSessionMetadata,
     getSession,
-    isIndexedDBAvailable,
-    migrateFromLocalStorage,
+    getUserId,
+    isDBStorageAvailable,
+    moveSessionToFolder as moveSessionToFolderAPI,
+    renameFolder as renameFolderAPI,
     type SessionMetadata,
     type StoredMessage,
     saveSession,
@@ -19,7 +25,7 @@ import {
 export interface SessionData {
     messages: StoredMessage[]
     xmlSnapshots: [number, string][]
-    diagramXml: string
+    diagramXml: string | null
     thumbnailDataUrl?: string
     diagramHistory?: { svg: string; xml: string }[]
 }
@@ -27,6 +33,7 @@ export interface SessionData {
 export interface UseSessionManagerReturn {
     // State
     sessions: SessionMetadata[]
+    folders: FolderMetadata[]
     currentSessionId: string | null
     currentSession: ChatSession | null
     isLoading: boolean
@@ -42,6 +49,16 @@ export interface UseSessionManagerReturn {
     ) => Promise<void>
     refreshSessions: () => Promise<void>
     clearCurrentSession: () => void
+    renameSession: (id: string, newTitle: string) => Promise<void>
+    // Folder actions
+    refreshFolders: () => Promise<void>
+    createFolder: (name: string) => Promise<FolderMetadata | null>
+    renameFolder: (id: string, newName: string) => Promise<void>
+    deleteFolder: (id: string) => Promise<void>
+    moveSessionToFolder: (
+        sessionId: string,
+        folderId: string | null,
+    ) => Promise<void>
 }
 
 interface UseSessionManagerOptions {
@@ -54,6 +71,7 @@ export function useSessionManager(
 ): UseSessionManagerReturn {
     const { initialSessionId } = options
     const [sessions, setSessions] = useState<SessionMetadata[]>([])
+    const [folders, setFolders] = useState<FolderMetadata[]>([])
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(
         null,
     )
@@ -69,7 +87,7 @@ export function useSessionManager(
 
     // Load sessions list
     const refreshSessions = useCallback(async () => {
-        if (!isIndexedDBAvailable()) return
+        if (!isDBStorageAvailable()) return
         try {
             const metadata = await getAllSessionMetadata()
             setSessions(metadata)
@@ -86,7 +104,7 @@ export function useSessionManager(
         async function init() {
             setIsLoading(true)
 
-            if (!isIndexedDBAvailable()) {
+            if (!isDBStorageAvailable()) {
                 setIsAvailable(false)
                 setIsLoading(false)
                 return
@@ -95,12 +113,40 @@ export function useSessionManager(
             setIsAvailable(true)
 
             try {
-                // Run migration first (one-time conversion from localStorage)
-                await migrateFromLocalStorage()
+                // Check for old IndexedDB data and migrate if needed
+                const {
+                    hasOldIndexedDBData,
+                    migrateIndexedDBToPostgres,
+                    clearOldIndexedDB,
+                } = await import("@/lib/indexeddb-migration")
+                const hasOldData = await hasOldIndexedDBData()
+
+                if (hasOldData) {
+                    console.log(
+                        "[Session Manager] Found old IndexedDB data, migrating...",
+                    )
+                    const userId = getUserId()
+                    const result = await migrateIndexedDBToPostgres(userId)
+                    console.log(
+                        `[Session Manager] Migration complete: ${result.migrated}/${result.total} sessions migrated`,
+                    )
+
+                    if (result.migrated > 0 && result.failed === 0) {
+                        // Clear old data after successful migration
+                        await clearOldIndexedDB()
+                        console.log(
+                            "[Session Manager] Old IndexedDB data cleared",
+                        )
+                    }
+                }
 
                 // Load sessions list
                 const metadata = await getAllSessionMetadata()
                 setSessions(metadata)
+
+                // Load folders list
+                const folderList = await getAllFolders()
+                setFolders(folderList)
 
                 // Only load a session if initialSessionId is provided (from URL param)
                 if (initialSessionId) {
@@ -208,7 +254,7 @@ export function useSessionManager(
     const deleteSession = useCallback(
         async (id: string): Promise<{ wasCurrentSession: boolean }> => {
             const wasCurrentSession = id === currentSessionId
-            await deleteSessionFromDB(id)
+            await deleteSessionFromAPI(id)
 
             // If deleting current session, clear state (caller will show new empty session)
             if (wasCurrentSession) {
@@ -239,9 +285,12 @@ export function useSessionManager(
                 return
             }
 
+            const userId = getUserId()
+            if (!userId) return
+
             if (!currentSession) {
                 // Create a new session if none exists
-                const newSession: ChatSession = {
+                const newSessionData = {
                     ...createEmptySession(),
                     messages: data.messages,
                     xmlSnapshots: data.xmlSnapshots,
@@ -250,17 +299,18 @@ export function useSessionManager(
                     diagramHistory: data.diagramHistory,
                     title: extractTitle(data.messages),
                 }
-                await saveSession(newSession)
-                await enforceSessionLimit()
-                setCurrentSession(newSession)
-                setCurrentSessionId(newSession.id)
-                await refreshSessions()
+                const newSession = await saveSession(newSessionData)
+                if (newSession) {
+                    setCurrentSession(newSession)
+                    setCurrentSessionId(newSession.id)
+                    await refreshSessions()
+                }
                 return
             }
 
             // Update existing session
-            const updatedSession: ChatSession = {
-                ...currentSession,
+            const updatedSession = await saveSession({
+                id: currentSession.id,
                 messages: data.messages,
                 xmlSnapshots: data.xmlSnapshots,
                 diagramXml: data.diagramXml,
@@ -268,37 +318,70 @@ export function useSessionManager(
                     data.thumbnailDataUrl ?? currentSession.thumbnailDataUrl,
                 diagramHistory:
                     data.diagramHistory ?? currentSession.diagramHistory,
-                updatedAt: Date.now(),
                 // Update title if it's still default and we have messages
                 title:
                     currentSession.title === "New Chat" &&
                     data.messages.length > 0
                         ? extractTitle(data.messages)
                         : currentSession.title,
+            })
+
+            if (updatedSession) {
+                setCurrentSession(updatedSession)
+
+                // Update sessions list metadata
+                setSessions((prev) =>
+                    prev.map((s) =>
+                        s.id === updatedSession.id
+                            ? {
+                                  ...s,
+                                  title: updatedSession.title,
+                                  updatedAt: updatedSession.updatedAt,
+                                  messageCount: updatedSession.messageCount,
+                                  hasDiagram: updatedSession.hasDiagram,
+                                  thumbnailDataUrl:
+                                      updatedSession.thumbnailDataUrl,
+                              }
+                            : s,
+                    ),
+                )
             }
-
-            await saveSession(updatedSession)
-            setCurrentSession(updatedSession)
-
-            // Update sessions list metadata
-            setSessions((prev) =>
-                prev.map((s) =>
-                    s.id === updatedSession.id
-                        ? {
-                              ...s,
-                              title: updatedSession.title,
-                              updatedAt: updatedSession.updatedAt,
-                              messageCount: updatedSession.messages.length,
-                              hasDiagram:
-                                  !!updatedSession.diagramXml &&
-                                  updatedSession.diagramXml.trim().length > 0,
-                              thumbnailDataUrl: updatedSession.thumbnailDataUrl,
-                          }
-                        : s,
-                ),
-            )
         },
         [currentSession, currentSessionId, refreshSessions],
+    )
+
+    // Rename a session
+    const renameSession = useCallback(
+        async (id: string, newTitle: string): Promise<void> => {
+            const updatedSession = await saveSession({
+                id,
+                title: newTitle,
+            })
+
+            if (updatedSession) {
+                // Update sessions list metadata
+                setSessions((prev) =>
+                    prev.map((s) =>
+                        s.id === updatedSession.id
+                            ? {
+                                  ...s,
+                                  title: updatedSession.title,
+                                  updatedAt: updatedSession.updatedAt,
+                              }
+                            : s,
+                    ),
+                )
+
+                // If this is the current session, update it too
+                if (currentSessionId === id && currentSession) {
+                    setCurrentSession({
+                        ...currentSession,
+                        title: updatedSession.title,
+                    })
+                }
+            }
+        },
+        [currentSessionId, currentSession],
     )
 
     // Clear current session state (for starting fresh without loading another session)
@@ -307,8 +390,77 @@ export function useSessionManager(
         setCurrentSessionId(null)
     }, [])
 
+    // ===== FOLDER ACTIONS =====
+
+    // Load folders list
+    const refreshFolders = useCallback(async () => {
+        if (!isDBStorageAvailable()) return
+        try {
+            const folderList = await getAllFolders()
+            setFolders(folderList)
+        } catch (error) {
+            console.error("Failed to refresh folders:", error)
+        }
+    }, [])
+
+    // Create a new folder
+    const createFolder = useCallback(
+        async (name: string): Promise<FolderMetadata | null> => {
+            const newFolder = await createFolderAPI(name)
+            if (newFolder) {
+                setFolders((prev) =>
+                    [...prev, newFolder].sort((a, b) =>
+                        a.name.localeCompare(b.name),
+                    ),
+                )
+            }
+            return newFolder
+        },
+        [],
+    )
+
+    // Rename a folder
+    const renameFolder = useCallback(
+        async (id: string, newName: string): Promise<void> => {
+            const updated = await renameFolderAPI(id, newName)
+            if (updated) {
+                setFolders((prev) =>
+                    prev
+                        .map((f) =>
+                            f.id === id ? { ...f, name: updated.name } : f,
+                        )
+                        .sort((a, b) => a.name.localeCompare(b.name)),
+                )
+            }
+        },
+        [],
+    )
+
+    // Delete a folder (sessions move to uncategorized)
+    const deleteFolder = useCallback(async (id: string): Promise<void> => {
+        const success = await deleteFolderAPI(id)
+        if (success) {
+            setFolders((prev) => prev.filter((f) => f.id !== id))
+        }
+    }, [])
+
+    // Move a session to a folder
+    const moveSessionToFolder = useCallback(
+        async (sessionId: string, folderId: string | null): Promise<void> => {
+            const success = await moveSessionToFolderAPI(sessionId, folderId)
+            if (success) {
+                // Refresh folders to update session counts
+                await refreshFolders()
+                // Refresh sessions to update folderId
+                await refreshSessions()
+            }
+        },
+        [refreshFolders, refreshSessions],
+    )
+
     return {
         sessions,
+        folders,
         currentSessionId,
         currentSession,
         isLoading,
@@ -318,5 +470,12 @@ export function useSessionManager(
         saveCurrentSession,
         refreshSessions,
         clearCurrentSession,
+        renameSession,
+        // Folder actions
+        refreshFolders,
+        createFolder,
+        renameFolder,
+        deleteFolder,
+        moveSessionToFolder,
     }
 }

@@ -1,7 +1,14 @@
 "use client"
 
 import type React from "react"
-import { createContext, useContext, useEffect, useRef, useState } from "react"
+import {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useRef,
+    useState,
+} from "react"
 import type { DrawIoEmbedRef } from "react-drawio"
 import { toast } from "sonner"
 import type { ExportFormat } from "@/components/save-dialog"
@@ -70,18 +77,24 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     const hasDiagramRestoredRef = useRef<boolean>(false)
     // Track latest chartXML for restoration after remount
     const chartXMLRef = useRef<string>("")
+    // Pending load queue: stores diagram XML to load when DrawIO becomes ready
+    // This handles the case when loadDiagram() is called before DrawIO is ready
+    const pendingLoadRef = useRef<{
+        xml: string
+        saveToHistory?: boolean
+    } | null>(null)
 
-    const onDrawioLoad = () => {
+    const onDrawioLoad = useCallback(() => {
         // Only set ready state once to prevent infinite loops
         if (hasCalledOnLoadRef.current) return
         hasCalledOnLoadRef.current = true
         setIsDrawioReady(true)
-    }
+    }, [])
 
-    const resetDrawioReady = () => {
+    const resetDrawioReady = useCallback(() => {
         hasCalledOnLoadRef.current = false
         setIsDrawioReady(false)
-    }
+    }, [])
 
     // Keep chartXMLRef in sync with state for restoration after remount
     useEffect(() => {
@@ -89,6 +102,7 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     }, [chartXML])
 
     // Restore diagram when DrawIO becomes ready after remount (e.g., theme/UI change)
+    // Priority: 1) pendingLoadRef (from loadDiagram called before ready), 2) chartXMLRef, 3) localStorage
     useEffect(() => {
         // Reset restore flag when DrawIO is not ready (preparing for next restore cycle)
         if (!isDrawioReady) {
@@ -101,11 +115,53 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
 
         // In embed mode, don't restore from localStorage - wait for parent to send diagram
         if (isEmbedMode()) {
+            // But still process pending load if any (for embed mode session restore)
+            if (pendingLoadRef.current && drawioRef.current) {
+                const { xml, saveToHistory } = pendingLoadRef.current
+                drawioRef.current.load({ xml })
+                pendingLoadRef.current = null
+
+                if (saveToHistory) {
+                    setTimeout(() => {
+                        expectHistoryExportRef.current = true
+                        drawioRef.current?.exportDiagram({ format: "xmlsvg" })
+                    }, 500)
+                }
+            }
             setCanSaveDiagram(true)
             return
         }
 
         try {
+            // Priority 1: Process pending load (from loadDiagram called before DrawIO was ready)
+            if (pendingLoadRef.current && drawioRef.current) {
+                const { xml, saveToHistory } = pendingLoadRef.current
+                drawioRef.current.load({ xml })
+                pendingLoadRef.current = null
+
+                if (saveToHistory) {
+                    setTimeout(() => {
+                        expectHistoryExportRef.current = true
+                        drawioRef.current?.exportDiagram({ format: "xmlsvg" })
+                    }, 500)
+                }
+                setCanSaveDiagram(true)
+                return
+            }
+
+            // Priority 2: Restore from chartXMLRef (set by session manager before DrawIO was ready)
+            // This handles the case when:
+            // - User navigates from history page and session loads before DrawIO
+            // - User switches theme/UI causing DrawIO iframe to reload
+            if (chartXMLRef.current && chartXMLRef.current.length > 300) {
+                if (drawioRef.current) {
+                    drawioRef.current.load({ xml: chartXMLRef.current })
+                }
+                setCanSaveDiagram(true)
+                return
+            }
+
+            // Priority 3: Fallback to localStorage (for direct page loads without session)
             const savedDiagramXml = localStorage.getItem(
                 STORAGE_DIAGRAM_XML_KEY,
             )
@@ -147,7 +203,6 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         if (drawioRef.current) {
             // Mark that this export should be saved to history
             expectHistoryExportRef.current = true
-            console.log("[NextAI context] handleExport called (with history)")
             drawioRef.current.exportDiagram({
                 format: "xmlsvg",
             })
@@ -161,7 +216,6 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
     const handleExportWithoutHistory = () => {
         if (drawioRef.current) {
             // Export without saving to history (for edit_diagram fetching current state)
-            console.log("[NextAI context] handleExportWithoutHistory called")
             drawioRef.current.exportDiagram({
                 format: "xmlsvg",
             })
@@ -231,7 +285,8 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         // Keep chartXML in sync even when diagrams are injected (e.g., display_diagram tool)
         setChartXML(xmlToLoad)
 
-        if (drawioRef.current) {
+        if (isDrawioReady && drawioRef.current) {
+            // DrawIO is ready - load immediately
             drawioRef.current.load({
                 xml: xmlToLoad,
             })
@@ -244,17 +299,15 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
                     drawioRef.current?.exportDiagram({ format: "xmlsvg" })
                 }, 500) // 500ms should be enough for draw.io to render
             }
+        } else {
+            // DrawIO not ready yet - queue the load for when it becomes ready
+            pendingLoadRef.current = { xml: xmlToLoad, saveToHistory }
         }
 
         return null
     }
 
     const handleDiagramExport = (data: any) => {
-        console.log(
-            "[NextAI context] handleDiagramExport called, data.data length:",
-            data?.data?.length,
-        )
-
         // Handle save to file if requested (process raw data before extraction)
         if (saveResolverRef.current.resolver) {
             const format = saveResolverRef.current.format
@@ -275,15 +328,10 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
         }
 
         const extractedXML = extractDiagramXML(data.data)
-        console.log(
-            "[NextAI context] Extracted XML length:",
-            extractedXML?.length,
-        )
         setChartXML(extractedXML)
         setLatestSvg(data.data)
         // Increment counter to ensure useEffect triggers even if SVG content is same
         setExportCounter((c) => c + 1)
-        console.log("[NextAI context] Updated chartXML and latestSvg")
 
         // Only add to history if this was a user-initiated export
         // Limit to 20 entries to prevent memory leaks during long sessions

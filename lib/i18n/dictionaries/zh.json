@@ -8,7 +8,8 @@
         "edit": "编辑",
         "delete": "删除",
         "loading": "加载中...",
-        "new": "新建"
+        "new": "新建",
+        "rename": "重命名"
     },
     "nav": {
         "about": "关于",
@@ -20,6 +21,14 @@
         "showPanel": "显示聊天面板 (Ctrl+B)",
         "aiChat": "AI 聊天",
         "copyDiagram": "复制图表为图片"
+    },
+    "folders": {
+        "all": "所有对话",
+        "uncategorized": "未分类",
+        "newFolder": "新建文件夹",
+        "folderNamePlaceholder": "文件夹名称",
+        "moveToFolder": "移动到文件夹",
+        "noFolder": "无（未分类）"
     },
     "providers": {
         "useServerDefault": "使用服务器默认值",
@@ -240,6 +249,8 @@
         "emptyHint": "开始对话吧",
         "today": "今天",
         "yesterday": "昨天",
+        "lastWeek": "过去 7 天",
+        "older": "更早",
         "thisWeek": "本周",
         "earlier": "更早",
         "deleteTitle": "删除此对话？",
@@ -247,7 +258,10 @@
         "recentChats": "最近对话",
         "justNow": "刚刚",
         "searchPlaceholder": "搜索对话...",
-        "noResults": "未找到对话"
+        "noResults": "未找到对话",
+        "messages": "条消息",
+        "renameTitle": "重命名对话",
+        "renamePlaceholder": "输入新标题..."
     },
     "modelConfig": {
         "title": "AI 模型配置",

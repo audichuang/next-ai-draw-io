@@ -1,24 +1,24 @@
-import { type DBSchema, type IDBPDatabase, openDB } from "idb"
 import { nanoid } from "nanoid"
+import { getApiEndpoint } from "./base-path"
 
 // Constants
-const DB_NAME = "next-ai-drawio"
-const DB_VERSION = 1
-const STORE_NAME = "sessions"
-const MIGRATION_FLAG = "next-ai-drawio-migrated-to-idb"
-const MAX_SESSIONS = 50
+const MAX_TITLE_LENGTH = 100
+const DEVICE_ID_KEY = "next-ai-drawio-device-id"
 
 // Types
 export interface ChatSession {
     id: string
+    userId: string
     title: string
-    createdAt: number
-    updatedAt: number
+    createdAt: string
+    updatedAt: string
     messages: StoredMessage[]
     xmlSnapshots: [number, string][]
-    diagramXml: string
-    thumbnailDataUrl?: string // Small PNG preview of the diagram
-    diagramHistory?: { svg: string; xml: string }[] // Version history of diagram edits
+    diagramXml: string | null
+    thumbnailDataUrl?: string
+    diagramHistory?: { svg: string; xml: string }[]
+    messageCount: number
+    hasDiagram: boolean
 }
 
 export interface StoredMessage {
@@ -30,76 +30,63 @@ export interface StoredMessage {
 export interface SessionMetadata {
     id: string
     title: string
-    createdAt: number
-    updatedAt: number
+    createdAt: string
+    updatedAt: string
     messageCount: number
     hasDiagram: boolean
     thumbnailDataUrl?: string
+    folderId?: string | null
 }
 
-interface ChatSessionDB extends DBSchema {
-    sessions: {
-        key: string
-        value: ChatSession
-        indexes: { "by-updated": number }
+// Get or create device ID for anonymous users
+export function getDeviceId(): string {
+    if (typeof window === "undefined") return ""
+
+    let deviceId = localStorage.getItem(DEVICE_ID_KEY)
+    if (!deviceId) {
+        deviceId = `device-${nanoid()}`
+        localStorage.setItem(DEVICE_ID_KEY, deviceId)
     }
+    return deviceId
 }
 
-// Database singleton
-let dbPromise: Promise<IDBPDatabase<ChatSessionDB>> | null = null
+// Get user ID (access code if available, otherwise device ID)
+export function getUserId(): string {
+    if (typeof window === "undefined") return ""
 
-async function getDB(): Promise<IDBPDatabase<ChatSessionDB>> {
-    if (!dbPromise) {
-        dbPromise = openDB<ChatSessionDB>(DB_NAME, DB_VERSION, {
-            upgrade(db, oldVersion) {
-                if (oldVersion < 1) {
-                    const store = db.createObjectStore(STORE_NAME, {
-                        keyPath: "id",
-                    })
-                    store.createIndex("by-updated", "updatedAt")
-                }
-                // Future migrations: if (oldVersion < 2) { ... }
-            },
-        })
+    // Check for access code first
+    const accessCode = localStorage.getItem("next-ai-draw-io-access-code")
+    if (accessCode?.trim()) {
+        return `access-${accessCode.trim()}`
     }
-    return dbPromise
+
+    // Fall back to device ID
+    return getDeviceId()
 }
 
-// Check if IndexedDB is available
-export function isIndexedDBAvailable(): boolean {
-    if (typeof window === "undefined") return false
-    try {
-        return "indexedDB" in window && window.indexedDB !== null
-    } catch {
-        return false
-    }
+// Check if DB storage is configured (has DATABASE_URL)
+// In browser, we assume it's configured if API endpoints work
+export function isDBStorageAvailable(): boolean {
+    return typeof window !== "undefined"
 }
 
-// CRUD Operations
+// CRUD Operations via API
 export async function getAllSessionMetadata(): Promise<SessionMetadata[]> {
-    if (!isIndexedDBAvailable()) return []
-    try {
-        const db = await getDB()
-        const tx = db.transaction(STORE_NAME, "readonly")
-        const index = tx.store.index("by-updated")
-        const metadata: SessionMetadata[] = []
+    const userId = getUserId()
+    if (!userId) return []
 
-        // Use cursor to read only metadata fields (avoids loading full messages/XML)
-        let cursor = await index.openCursor(null, "prev") // newest first
-        while (cursor) {
-            const s = cursor.value
-            metadata.push({
-                id: s.id,
-                title: s.title,
-                createdAt: s.createdAt,
-                updatedAt: s.updatedAt,
-                messageCount: s.messages.length,
-                hasDiagram: !!s.diagramXml && s.diagramXml.trim().length > 0,
-                thumbnailDataUrl: s.thumbnailDataUrl,
-            })
-            cursor = await cursor.continue()
+    try {
+        const res = await fetch(
+            getApiEndpoint(
+                `/api/sessions?userId=${encodeURIComponent(userId)}`,
+            ),
+        )
+        if (!res.ok) {
+            // If API returns 500, DB might not be configured - fallback to empty
+            console.warn("Sessions API unavailable, using empty list")
+            return []
         }
-        return metadata
+        return await res.json()
     } catch (error) {
         console.error("Failed to get session metadata:", error)
         return []
@@ -107,113 +94,109 @@ export async function getAllSessionMetadata(): Promise<SessionMetadata[]> {
 }
 
 export async function getSession(id: string): Promise<ChatSession | null> {
-    if (!isIndexedDBAvailable()) return null
     try {
-        const db = await getDB()
-        return (await db.get(STORE_NAME, id)) || null
+        const res = await fetch(getApiEndpoint(`/api/sessions/${id}`))
+        if (!res.ok) return null
+        return await res.json()
     } catch (error) {
         console.error("Failed to get session:", error)
         return null
     }
 }
 
-export async function saveSession(session: ChatSession): Promise<boolean> {
-    if (!isIndexedDBAvailable()) return false
+export async function saveSession(
+    session: Partial<ChatSession> & { id?: string },
+): Promise<ChatSession | null> {
+    const userId = getUserId()
+    if (!userId) return null
+
     try {
-        const db = await getDB()
-        await db.put(STORE_NAME, session)
-        return true
-    } catch (error) {
-        // Handle quota exceeded
-        if (
-            error instanceof DOMException &&
-            error.name === "QuotaExceededError"
-        ) {
-            console.warn("Storage quota exceeded, deleting oldest session...")
-            await deleteOldestSession()
-            // Retry once
-            try {
-                const db = await getDB()
-                await db.put(STORE_NAME, session)
-                return true
-            } catch (retryError) {
-                console.error(
-                    "Failed to save session after cleanup:",
-                    retryError,
-                )
-                return false
-            }
+        if (session.id) {
+            // Update existing session
+            const res = await fetch(
+                getApiEndpoint(`/api/sessions/${session.id}`),
+                {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(session),
+                },
+            )
+            if (!res.ok) throw new Error("Failed to update session")
+            return await res.json()
         } else {
-            console.error("Failed to save session:", error)
-            return false
+            // Create new session
+            const res = await fetch(getApiEndpoint("/api/sessions"), {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ...session, userId }),
+            })
+            if (!res.ok) throw new Error("Failed to create session")
+            return await res.json()
         }
+    } catch (error) {
+        console.error("Failed to save session:", error)
+        return null
     }
 }
 
-export async function deleteSession(id: string): Promise<void> {
-    if (!isIndexedDBAvailable()) return
+export async function deleteSession(id: string): Promise<boolean> {
     try {
-        const db = await getDB()
-        await db.delete(STORE_NAME, id)
+        const res = await fetch(getApiEndpoint(`/api/sessions/${id}`), {
+            method: "DELETE",
+        })
+        return res.ok || res.status === 204
     } catch (error) {
         console.error("Failed to delete session:", error)
+        return false
     }
 }
 
-export async function getSessionCount(): Promise<number> {
-    if (!isIndexedDBAvailable()) return 0
+// Helper: Create a new empty session via API (returns full session with ID)
+export async function createEmptySession(): Promise<ChatSession | null> {
+    const userId = getUserId()
+    if (!userId) return null
+
     try {
-        const db = await getDB()
-        return await db.count(STORE_NAME)
+        const res = await fetch(getApiEndpoint("/api/sessions"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                userId,
+                title: "New Chat",
+                messages: [],
+                xmlSnapshots: [],
+                diagramXml: null,
+                messageCount: 0,
+                hasDiagram: false,
+            }),
+        })
+        if (!res.ok) throw new Error("Failed to create session")
+        return await res.json()
     } catch (error) {
-        console.error("Failed to get session count:", error)
-        return 0
+        console.error("Failed to create empty session:", error)
+        return null
     }
 }
 
-export async function deleteOldestSession(): Promise<void> {
-    if (!isIndexedDBAvailable()) return
+// Rename a session
+export async function renameSession(
+    sessionId: string,
+    newTitle: string,
+): Promise<boolean> {
     try {
-        const db = await getDB()
-        const tx = db.transaction(STORE_NAME, "readwrite")
-        const index = tx.store.index("by-updated")
-        const cursor = await index.openCursor()
-        if (cursor) {
-            await cursor.delete()
-        }
-        await tx.done
+        const res = await fetch(getApiEndpoint(`/api/sessions/${sessionId}`), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: newTitle }),
+        })
+        return res.ok
     } catch (error) {
-        console.error("Failed to delete oldest session:", error)
-    }
-}
-
-// Enforce max sessions limit
-export async function enforceSessionLimit(): Promise<void> {
-    const count = await getSessionCount()
-    if (count > MAX_SESSIONS) {
-        const toDelete = count - MAX_SESSIONS
-        for (let i = 0; i < toDelete; i++) {
-            await deleteOldestSession()
-        }
-    }
-}
-
-// Helper: Create a new empty session
-export function createEmptySession(): ChatSession {
-    return {
-        id: nanoid(),
-        title: "New Chat",
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        messages: [],
-        xmlSnapshots: [],
-        diagramXml: "",
+        console.error("Failed to rename session:", error)
+        return false
     }
 }
 
 // Helper: Extract title from first user message (truncated to reasonable length)
-const MAX_TITLE_LENGTH = 100
-
 export function extractTitle(messages: StoredMessage[]): string {
     const firstUserMessage = messages.find((m) => m.role === "user")
     if (!firstUserMessage) return "New Chat"
@@ -266,73 +249,119 @@ export function sanitizeMessages(messages: unknown[]): StoredMessage[] {
         .filter((m): m is StoredMessage => m !== null)
 }
 
-// Migration from localStorage
-export async function migrateFromLocalStorage(): Promise<string | null> {
-    if (typeof window === "undefined") return null
-    if (!isIndexedDBAvailable()) return null
+// Legacy compatibility - these are no-ops now since we use API
+export async function enforceSessionLimit(): Promise<void> {
+    // No-op: server handles this
+}
 
-    // Check if already migrated
-    if (localStorage.getItem(MIGRATION_FLAG)) return null
+export async function getSessionCount(): Promise<number> {
+    const sessions = await getAllSessionMetadata()
+    return sessions.length
+}
+
+// Migration from localStorage/IndexedDB is no longer needed
+// Old data will remain in browser storage but won't be used
+export async function migrateFromLocalStorage(): Promise<string | null> {
+    // No-op: migration not needed for API storage
+    return null
+}
+
+// Legacy function - kept for compatibility
+export function isIndexedDBAvailable(): boolean {
+    return isDBStorageAvailable()
+}
+
+// Folder Types and CRUD Operations
+export interface FolderMetadata {
+    id: string
+    name: string
+    createdAt: string
+    updatedAt: string
+    sessionCount: number
+}
+
+export async function getAllFolders(): Promise<FolderMetadata[]> {
+    const userId = getUserId()
+    if (!userId) return []
 
     try {
-        const savedMessages = localStorage.getItem("next-ai-draw-io-messages")
-        const savedSnapshots = localStorage.getItem(
-            "next-ai-draw-io-xml-snapshots",
+        const res = await fetch(
+            getApiEndpoint(`/api/folders?userId=${encodeURIComponent(userId)}`),
         )
-        const savedXml = localStorage.getItem("next-ai-draw-io-diagram-xml")
-
-        let newSessionId: string | null = null
-        let migrationSucceeded = false
-
-        if (savedMessages) {
-            const messages = JSON.parse(savedMessages)
-            if (Array.isArray(messages) && messages.length > 0) {
-                const sanitized = sanitizeMessages(messages)
-                const session: ChatSession = {
-                    id: nanoid(),
-                    title: extractTitle(sanitized),
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    messages: sanitized,
-                    xmlSnapshots: savedSnapshots
-                        ? JSON.parse(savedSnapshots)
-                        : [],
-                    diagramXml: savedXml || "",
-                }
-                const saved = await saveSession(session)
-                if (saved) {
-                    // Verify the session was actually written
-                    const verified = await getSession(session.id)
-                    if (verified) {
-                        newSessionId = session.id
-                        migrationSucceeded = true
-                    }
-                }
-            } else {
-                // Empty array or invalid data - nothing to migrate, mark as success
-                migrationSucceeded = true
-            }
-        } else {
-            // No data to migrate - mark as success
-            migrationSucceeded = true
+        if (!res.ok) {
+            console.warn("Folders API unavailable")
+            return []
         }
-
-        // Only clean up old data if migration succeeded
-        if (migrationSucceeded) {
-            localStorage.setItem(MIGRATION_FLAG, "true")
-            localStorage.removeItem("next-ai-draw-io-messages")
-            localStorage.removeItem("next-ai-draw-io-xml-snapshots")
-            localStorage.removeItem("next-ai-draw-io-diagram-xml")
-        } else {
-            console.warn(
-                "Migration to IndexedDB failed - keeping localStorage data for retry",
-            )
-        }
-
-        return newSessionId
+        return await res.json()
     } catch (error) {
-        console.error("Migration failed:", error)
-        // Don't mark as migrated - allow retry on next load
+        console.error("Failed to get folders:", error)
+        return []
+    }
+}
+
+export async function createFolder(
+    name: string,
+): Promise<FolderMetadata | null> {
+    const userId = getUserId()
+    if (!userId) return null
+
+    try {
+        const res = await fetch(getApiEndpoint("/api/folders"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId, name }),
+        })
+        if (!res.ok) throw new Error("Failed to create folder")
+        return await res.json()
+    } catch (error) {
+        console.error("Failed to create folder:", error)
         return null
+    }
+}
+
+export async function renameFolder(
+    id: string,
+    name: string,
+): Promise<FolderMetadata | null> {
+    try {
+        const res = await fetch(getApiEndpoint(`/api/folders/${id}`), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name }),
+        })
+        if (!res.ok) throw new Error("Failed to rename folder")
+        return await res.json()
+    } catch (error) {
+        console.error("Failed to rename folder:", error)
+        return null
+    }
+}
+
+export async function deleteFolder(id: string): Promise<boolean> {
+    try {
+        const res = await fetch(getApiEndpoint(`/api/folders/${id}`), {
+            method: "DELETE",
+        })
+        return res.ok || res.status === 204
+    } catch (error) {
+        console.error("Failed to delete folder:", error)
+        return false
+    }
+}
+
+export async function moveSessionToFolder(
+    sessionId: string,
+    folderId: string | null,
+): Promise<boolean> {
+    try {
+        const res = await fetch(getApiEndpoint(`/api/sessions/${sessionId}`), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folderId }),
+        })
+        return res.ok
+    } catch (error) {
+        console.error("Failed to move session to folder:", error)
+        return false
     }
 }

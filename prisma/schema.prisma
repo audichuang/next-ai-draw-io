@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Folder {
+  id        String        @id @default(cuid())
+  userId    String
+  name      String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  sessions  ChatSession[]
+
+  @@index([userId, name])
+}
+
+model ChatSession {
+  id               String   @id @default(cuid())
+  userId           String   // Access Code or Device ID
+  title            String   @default("New Chat")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Folder relation (optional - null means "Uncategorized")
+  folderId         String?
+  folder           Folder?  @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
+  // Chat content (JSON format)
+  messages         Json     @default("[]")
+  xmlSnapshots     Json     @default("[]")
+  diagramXml       String?  @db.Text
+  diagramHistory   Json?    @default("[]")
+  thumbnailDataUrl String?  @db.Text
+  
+  // Metadata for quick filtering
+  messageCount     Int      @default(0)
+  hasDiagram       Boolean  @default(false)
+
+  @@index([userId, updatedAt(sort: Desc)])
+  @@index([folderId])
+}

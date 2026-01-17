@@ -129,8 +129,19 @@ const getUserOriginalText = (message: UIMessage): string => {
 interface SessionMetadata {
     id: string
     title: string
-    updatedAt: number
+    createdAt: string
+    updatedAt: string
+    messageCount: number
+    hasDiagram: boolean
     thumbnailDataUrl?: string
+}
+
+interface FolderMetadata {
+    id: string
+    name: string
+    createdAt: string
+    updatedAt: string
+    sessionCount: number
 }
 
 interface ChatMessageDisplayProps {
@@ -145,8 +156,14 @@ interface ChatMessageDisplayProps {
     status?: "streaming" | "submitted" | "idle" | "error" | "ready"
     isRestored?: boolean
     sessions?: SessionMetadata[]
+    folders?: FolderMetadata[]
     onSelectSession?: (id: string) => void
     onDeleteSession?: (id: string) => void
+    onRenameSession?: (id: string, newTitle: string) => void
+    onMoveToFolder?: (sessionId: string, folderId: string | null) => void
+    onCreateFolder?: (name: string) => void
+    onRenameFolder?: (id: string, newName: string) => void
+    onDeleteFolder?: (id: string) => void
     loadedMessageIdsRef?: MutableRefObject<Set<string>>
 }
 
@@ -162,8 +179,14 @@ export function ChatMessageDisplay({
     status = "idle",
     isRestored = false,
     sessions = [],
+    folders = [],
     onSelectSession,
     onDeleteSession,
+    onRenameSession,
+    onMoveToFolder,
+    onCreateFolder,
+    onRenameFolder,
+    onDeleteFolder,
     loadedMessageIdsRef,
 }: ChatMessageDisplayProps) {
     const dict = useDictionary()
@@ -629,8 +652,14 @@ export function ChatMessageDisplay({
             {messages.length === 0 && isRestored ? (
                 <ChatLobby
                     sessions={sessions}
+                    folders={folders}
                     onSelectSession={onSelectSession || (() => {})}
                     onDeleteSession={onDeleteSession}
+                    onRenameSession={onRenameSession}
+                    onMoveToFolder={onMoveToFolder}
+                    onCreateFolder={onCreateFolder}
+                    onRenameFolder={onRenameFolder}
+                    onDeleteFolder={onDeleteFolder}
                     setInput={setInput}
                     setFiles={setFiles}
                     dict={dict}

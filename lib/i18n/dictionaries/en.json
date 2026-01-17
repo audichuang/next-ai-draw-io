@@ -8,7 +8,8 @@
         "edit": "Edit",
         "delete": "Delete",
         "loading": "Loading..",
-        "new": "NEW"
+        "new": "NEW",
+        "rename": "Rename"
     },
     "nav": {
         "about": "About",
@@ -20,6 +21,14 @@
         "showPanel": "Show chat panel (Ctrl+B)",
         "aiChat": "AI Chat",
         "copyDiagram": "Copy diagram as image"
+    },
+    "folders": {
+        "all": "All Sessions",
+        "uncategorized": "Uncategorized",
+        "newFolder": "New Folder",
+        "folderNamePlaceholder": "Folder name",
+        "moveToFolder": "Move to folder",
+        "noFolder": "None (Uncategorized)"
     },
     "providers": {
         "useServerDefault": "Use Server Default",
@@ -240,6 +249,8 @@
         "emptyHint": "Start a conversation to begin",
         "today": "Today",
         "yesterday": "Yesterday",
+        "lastWeek": "Last 7 Days",
+        "older": "Older",
         "thisWeek": "This Week",
         "earlier": "Earlier",
         "deleteTitle": "Delete this chat?",
@@ -247,7 +258,10 @@
         "recentChats": "Recent Chats",
         "justNow": "Just now",
         "searchPlaceholder": "Search chats...",
-        "noResults": "No chats found"
+        "noResults": "No chats found",
+        "messages": "messages",
+        "renameTitle": "Rename Chat",
+        "renamePlaceholder": "Enter new title..."
     },
     "modelConfig": {
         "title": "AI Model Configuration",

@@ -8,7 +8,8 @@
         "edit": "編集",
         "delete": "削除",
         "loading": "読み込み中..",
-        "new": "新規"
+        "new": "新規",
+        "rename": "名前を変更"
     },
     "nav": {
         "about": "概要",
@@ -20,6 +21,14 @@
         "showPanel": "チャットパネルを表示 (Ctrl+B)",
         "aiChat": "AI チャット",
         "copyDiagram": "ダイアグラムを画像としてコピー"
+    },
+    "folders": {
+        "all": "すべてのセッション",
+        "uncategorized": "未分類",
+        "newFolder": "新しいフォルダー",
+        "folderNamePlaceholder": "フォルダー名",
+        "moveToFolder": "フォルダーに移動",
+        "noFolder": "なし（未分類）"
     },
     "providers": {
         "useServerDefault": "サーバーデフォルトを使用",
@@ -240,6 +249,8 @@
         "emptyHint": "会話を始めてください",
         "today": "今日",
         "yesterday": "昨日",
+        "lastWeek": "過去 7 日間",
+        "older": "きより前",
         "thisWeek": "今週",
         "earlier": "それ以前",
         "deleteTitle": "このチャットを削除しますか？",
@@ -247,7 +258,10 @@
         "recentChats": "最近のチャット",
         "justNow": "たった今",
         "searchPlaceholder": "チャットを検索...",
-        "noResults": "チャットが見つかりません"
+        "noResults": "チャットが見つかりません",
+        "messages": "メッセージ",
+        "renameTitle": "チャット名を変更",
+        "renamePlaceholder": "新しい名前を入力..."
     },
     "modelConfig": {
         "title": "AIモデル設定",

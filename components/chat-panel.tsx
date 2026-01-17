@@ -3,6 +3,7 @@
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport } from "ai"
 import {
+    ArrowLeft,
     Copy,
     MessageSquarePlus,
     PanelRightClose,
@@ -82,6 +83,10 @@ interface ChatPanelProps {
     initialChatHistory?: string
     /** Callback to register getChatHistory function for export */
     onChatHistoryExport?: (fn: () => string) => void
+    /** Initial session ID for editor mode (two-page architecture) */
+    initialSessionId?: string
+    /** Callback to navigate back to history page */
+    onBackToHistory?: () => void
 }
 
 // Constants for tool states
@@ -127,6 +132,8 @@ export default function ChatPanel({
     onSaveToParent,
     initialChatHistory,
     onChatHistoryExport,
+    initialSessionId,
+    onBackToHistory,
 }: ChatPanelProps) {
     const {
         loadDiagram: onDisplayChart,
@@ -145,7 +152,8 @@ export default function ChatPanel({
     const dict = useDictionary()
     const router = useRouter()
     const searchParams = useSearchParams()
-    const urlSessionId = searchParams.get("session")
+    // Use initialSessionId prop (from route params) if available, otherwise fall back to query param
+    const urlSessionId = initialSessionId || searchParams.get("session")
 
     // Fetch current chart XML. saveToHistory=true only for first message to save initial state
     const onFetchChart = (saveToHistory = true) => {
@@ -488,7 +496,7 @@ export default function ChatPanel({
             data: {
                 messages: unknown[]
                 xmlSnapshots: [number, string][]
-                diagramXml: string
+                diagramXml: string | null
                 diagramHistory?: { svg: string; xml: string }[]
             } | null,
         ) => {
@@ -502,8 +510,8 @@ export default function ChatPanel({
                 setMessages(data.messages as any)
                 xmlSnapshotsRef.current = new Map(data.xmlSnapshots)
                 if (hasRealDiagram) {
-                    onDisplayChart(data.diagramXml, true)
-                    chartXMLRef.current = data.diagramXml
+                    onDisplayChart(data.diagramXml || "", true)
+                    chartXMLRef.current = data.diagramXml || ""
                 } else {
                     clearDiagram()
                     // Clear refs to prevent stale data from being saved
@@ -1068,6 +1076,16 @@ export default function ChatPanel({
         return userText
     }
 
+    const handleRenameSession = async (id: string, newTitle: string) => {
+        if (!sessionManager.isAvailable) return
+        try {
+            await sessionManager.renameSession(id, newTitle)
+        } catch (error) {
+            console.error("Failed to rename session:", error)
+            toast.error("Failed to rename session")
+        }
+    }
+
     const handleRegenerate = async (messageIndex: number) => {
         const isProcessing = status === "streaming" || status === "submitted"
         if (isProcessing) return
@@ -1236,34 +1254,51 @@ export default function ChatPanel({
                 className={`${isMobile ? "px-3 py-2" : "px-5 py-4"} border-b border-border/50`}
             >
                 <div className="flex items-center justify-between">
-                    <button
-                        type="button"
-                        onClick={handleNewChat}
-                        disabled={
-                            status === "streaming" || status === "submitted"
-                        }
-                        className="flex items-center gap-2 overflow-x-hidden hover:opacity-80 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                        title={dict.nav.newChat}
-                    >
-                        <div className="flex items-center gap-2">
-                            <Image
-                                src={
-                                    darkMode
-                                        ? "/favicon-white.svg"
-                                        : "/favicon.ico"
+                    <div className="flex items-center gap-2">
+                        {/* Back to history button (editor mode) */}
+                        {onBackToHistory && (
+                            <ButtonWithTooltip
+                                tooltipContent={
+                                    dict.sessionHistory?.recentChats ||
+                                    "History"
                                 }
-                                alt="Next AI Drawio"
-                                width={isMobile ? 24 : 28}
-                                height={isMobile ? 24 : 28}
-                                className="rounded flex-shrink-0"
-                            />
-                            <h1
-                                className={`${isMobile ? "text-sm" : "text-base"} font-semibold tracking-tight whitespace-nowrap`}
+                                variant="ghost"
+                                size="icon"
+                                onClick={onBackToHistory}
+                                className="h-8 w-8"
                             >
-                                Next AI Drawio
-                            </h1>
-                        </div>
-                    </button>
+                                <ArrowLeft className="h-4 w-4" />
+                            </ButtonWithTooltip>
+                        )}
+                        <button
+                            type="button"
+                            onClick={handleNewChat}
+                            disabled={
+                                status === "streaming" || status === "submitted"
+                            }
+                            className="flex items-center gap-2 overflow-x-hidden hover:opacity-80 transition-opacity cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={dict.nav.newChat}
+                        >
+                            <div className="flex items-center gap-2">
+                                <Image
+                                    src={
+                                        darkMode
+                                            ? "/favicon-white.svg"
+                                            : "/favicon.ico"
+                                    }
+                                    alt="Next AI Drawio"
+                                    width={isMobile ? 24 : 28}
+                                    height={isMobile ? 24 : 28}
+                                    className="rounded flex-shrink-0"
+                                />
+                                <h1
+                                    className={`${isMobile ? "text-sm" : "text-base"} font-semibold tracking-tight whitespace-nowrap`}
+                                >
+                                    Next AI Drawio
+                                </h1>
+                            </div>
+                        </button>
+                    </div>
                     <div className="flex items-center gap-1 justify-end overflow-visible">
                         {/* Embed mode: Save & Close button */}
                         {isEmbedMode && onSaveToParent && (
@@ -1364,8 +1399,14 @@ export default function ChatPanel({
                     onEditMessage={handleEditMessage}
                     isRestored={isRestored}
                     sessions={sessionManager.sessions}
+                    folders={sessionManager.folders}
                     onSelectSession={handleSelectSession}
                     onDeleteSession={handleDeleteSession}
+                    onRenameSession={handleRenameSession}
+                    onMoveToFolder={sessionManager.moveSessionToFolder}
+                    onCreateFolder={sessionManager.createFolder}
+                    onRenameFolder={sessionManager.renameFolder}
+                    onDeleteFolder={sessionManager.deleteFolder}
                     loadedMessageIdsRef={loadedMessageIdsRef}
                 />
             </main>

@@ -8,7 +8,8 @@
         "edit": "編輯",
         "delete": "刪除",
         "loading": "載入中...",
-        "new": "新建"
+        "new": "新建",
+        "rename": "重新命名"
     },
     "nav": {
         "about": "關於",
@@ -20,6 +21,14 @@
         "showPanel": "顯示聊天面板 (Ctrl+B)",
         "aiChat": "AI 聊天",
         "copyDiagram": "複製圖表為圖片"
+    },
+    "folders": {
+        "all": "所有對話",
+        "uncategorized": "未分類",
+        "newFolder": "新增資料夾",
+        "folderNamePlaceholder": "資料夾名稱",
+        "moveToFolder": "移動到資料夾",
+        "noFolder": "無（未分類）"
     },
     "providers": {
         "useServerDefault": "使用伺服器預設值",
@@ -108,7 +117,13 @@
         "diagramActions": "圖表操作",
         "diagramActionsDescription": "管理圖表歷史記錄和匯出",
         "history": "歷史記錄",
-        "download": "下載"
+        "download": "下載",
+        "proxy": "代理設定",
+        "proxyDescription": "設定 API 請求的 HTTP/HTTPS 代理（僅桌面版）",
+        "httpProxy": "HTTP 代理",
+        "httpsProxy": "HTTPS 代理",
+        "applyProxy": "套用",
+        "proxyApplied": "代理設定已套用"
     },
     "save": {
         "title": "儲存圖表",
@@ -234,6 +249,8 @@
         "emptyHint": "開始對話吧",
         "today": "今天",
         "yesterday": "昨天",
+        "lastWeek": "過去 7 天",
+        "older": "更早",
         "thisWeek": "本週",
         "earlier": "更早",
         "deleteTitle": "刪除此對話？",
@@ -241,7 +258,10 @@
         "recentChats": "最近對話",
         "justNow": "剛剛",
         "searchPlaceholder": "搜尋對話...",
-        "noResults": "未找到對話"
+        "noResults": "未找到對話",
+        "messages": "則訊息",
+        "renameTitle": "重新命名對話",
+        "renamePlaceholder": "輸入新標題..."
     },
     "modelConfig": {
         "title": "AI 模型配置",
