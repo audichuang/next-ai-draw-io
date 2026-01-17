@@ -84,6 +84,8 @@ export function useSessionManager(
     const isInitializedRef = useRef(false)
     // Sequence guard for URL changes - prevents out-of-order async resolution
     const urlChangeSequenceRef = useRef(0)
+    // Track last loaded session ID to prevent duplicate API calls
+    const lastLoadedSessionIdRef = useRef<string | null>(null)
 
     // Load sessions list
     const refreshSessions = useCallback(async () => {
@@ -108,6 +110,11 @@ export function useSessionManager(
                 setIsAvailable(false)
                 setIsLoading(false)
                 return
+            }
+
+            // Mark as loading BEFORE setIsAvailable to prevent second effect from loading
+            if (initialSessionId) {
+                lastLoadedSessionIdRef.current = initialSessionId
             }
 
             setIsAvailable(true)
@@ -175,12 +182,18 @@ export function useSessionManager(
         if (!isInitializedRef.current) return // Wait for initial load
         if (!isAvailable) return
 
+        // Skip if we already loaded this session ID
+        if (initialSessionId === lastLoadedSessionIdRef.current) return
+
         // Increment sequence to invalidate any pending async operations
         urlChangeSequenceRef.current++
         const currentSequence = urlChangeSequenceRef.current
 
         async function handleSessionIdChange() {
             if (initialSessionId) {
+                // Mark as loading to prevent duplicate requests
+                lastLoadedSessionIdRef.current = initialSessionId
+
                 // URL has session ID - load it
                 const session = await getSession(initialSessionId)
 
