@@ -1,17 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 
-// GET /api/folders - List all folders for a user
-export async function GET(request: NextRequest) {
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get("userId")
-
-    if (!userId) {
-        return NextResponse.json(
-            { error: "userId is required" },
-            { status: 400 },
-        )
+// GET /api/folders - List all folders for authenticated user
+export async function GET() {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+
+    const userId = session.user.id
 
     try {
         const folders = await prisma.folder.findMany({
@@ -49,13 +47,20 @@ export async function GET(request: NextRequest) {
 
 // POST /api/folders - Create a new folder
 export async function POST(request: NextRequest) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
+
     try {
         const body = await request.json()
-        const { userId, name } = body
+        const { name } = body
 
-        if (!userId || !name?.trim()) {
+        if (!name?.trim()) {
             return NextResponse.json(
-                { error: "userId and name are required" },
+                { error: "name is required" },
                 { status: 400 },
             )
         }

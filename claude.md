@@ -8,6 +8,21 @@ AI 驅動的 draw.io 圖表工具，支援透過自然語言生成和修改圖�
 
 **Live Demo**: https://next-ai-drawio.jiang.jp/
 
+## 🚨 Quality Gates（必讀）
+
+> **AI Agent 注意**：commit 和 push 前必須執行對應的檢查，確保代碼品質。
+
+| 時機 | 命令 | 說明 |
+|------|------|------|
+| **commit 前** | `make check-fast` | TS 類型檢查 + Lint + 單元測試 |
+| **push 前** | `make check-build` | 上述 + 構建檢查 |
+| 完整檢查 | `make check-all` | 上述 + E2E 測試 |
+
+```bash
+# 快速查看所有可用命令
+make help
+```
+
 ## 常用命令
 
 ```bash
@@ -16,10 +31,10 @@ npm run dev          # 開發模式 (port 6002, turbopack)
 npm run build        # 建構生產版本
 npm start            # 生產模式 (port 6001)
 
-# 程式碼品質
-npm run lint         # Biome lint 檢查
-npm run format       # Biome 格式化
-npm run check        # Biome CI 檢查
+# 程式碼品質 (推薦使用 make)
+make check-fast      # ⭐ commit 前必跑
+make check-build     # 🚀 push 前必跑
+make format          # Biome 格式化
 
 # 測試
 npm test             # Vitest 單元測試

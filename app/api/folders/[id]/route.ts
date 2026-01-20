@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 
 // PUT /api/folders/[id] - Rename a folder
@@ -6,6 +7,11 @@ export async function PUT(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { id } = await params
     try {
         const body = await request.json()
@@ -19,7 +25,7 @@ export async function PUT(
         }
 
         const folder = await prisma.folder.update({
-            where: { id },
+            where: { id, userId: session.user.id },
             data: { name: name.trim() },
         })
 
@@ -43,17 +49,22 @@ export async function DELETE(
     _request: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { id } = await params
     try {
         // First, unlink all sessions from this folder (move to uncategorized)
         await prisma.chatSession.updateMany({
-            where: { folderId: id },
+            where: { folderId: id, userId: session.user.id },
             data: { folderId: null },
         })
 
         // Then delete the folder
         await prisma.folder.delete({
-            where: { id },
+            where: { id, userId: session.user.id },
         })
 
         return new NextResponse(null, { status: 204 })

@@ -359,6 +359,10 @@ export function DiagramProvider({ children }: { children: React.ReactNode }) {
 
     const clearDiagram = () => {
         const emptyDiagram = `<mxfile><diagram name="Page-1" id="page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>`
+        // Clear the ref to prevent restore effect from reloading old diagram
+        chartXMLRef.current = ""
+        // Clear localStorage to prevent restoration on page reload
+        localStorage.removeItem(STORAGE_DIAGRAM_XML_KEY)
         // Skip validation for trusted internal template (loadDiagram also sets chartXML)
         loadDiagram(emptyDiagram, true)
         setLatestSvg("")

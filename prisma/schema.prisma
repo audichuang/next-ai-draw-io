@@ -7,9 +7,68 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ===== NextAuth Models =====
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+  // Relations to app data
+  chatSessions  ChatSession[]
+  folders       Folder[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// ===== App Models =====
+
 model Folder {
   id        String        @id @default(cuid())
   userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
@@ -20,7 +79,8 @@ model Folder {
 
 model ChatSession {
   id               String   @id @default(cuid())
-  userId           String   // Access Code or Device ID
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title            String   @default("New Chat")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -43,3 +103,4 @@ model ChatSession {
   @@index([userId, updatedAt(sort: Desc)])
   @@index([folderId])
 }
+

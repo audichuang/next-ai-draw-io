@@ -1,17 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 
-// GET /api/sessions - Get all sessions for a user
-export async function GET(request: NextRequest) {
-    const searchParams = request.nextUrl.searchParams
-    const userId = searchParams.get("userId")
-
-    if (!userId) {
-        return NextResponse.json(
-            { error: "userId is required" },
-            { status: 400 },
-        )
+// GET /api/sessions - Get all sessions for authenticated user
+export async function GET() {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+
+    const userId = session.user.id
 
     try {
         const sessions = await prisma.chatSession.findMany({
@@ -41,10 +39,16 @@ export async function GET(request: NextRequest) {
 
 // POST /api/sessions - Create a new session
 export async function POST(request: NextRequest) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    const userId = session.user.id
+
     try {
         const body = await request.json()
         const {
-            userId,
             title,
             messages,
             xmlSnapshots,
@@ -53,14 +57,7 @@ export async function POST(request: NextRequest) {
             thumbnailDataUrl,
         } = body
 
-        if (!userId) {
-            return NextResponse.json(
-                { error: "userId is required" },
-                { status: 400 },
-            )
-        }
-
-        const session = await prisma.chatSession.create({
+        const chatSession = await prisma.chatSession.create({
             data: {
                 userId,
                 title: title || "New Chat",
@@ -74,7 +71,7 @@ export async function POST(request: NextRequest) {
             },
         })
 
-        return NextResponse.json(session, { status: 201 })
+        return NextResponse.json(chatSession, { status: 201 })
     } catch (error) {
         console.error("Failed to create session:", error)
         return NextResponse.json(

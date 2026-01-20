@@ -1,9 +1,7 @@
-import { nanoid } from "nanoid"
 import { getApiEndpoint } from "./base-path"
 
 // Constants
 const MAX_TITLE_LENGTH = 100
-const DEVICE_ID_KEY = "next-ai-drawio-device-id"
 
 // Types
 export interface ChatSession {
@@ -38,32 +36,6 @@ export interface SessionMetadata {
     folderId?: string | null
 }
 
-// Get or create device ID for anonymous users
-export function getDeviceId(): string {
-    if (typeof window === "undefined") return ""
-
-    let deviceId = localStorage.getItem(DEVICE_ID_KEY)
-    if (!deviceId) {
-        deviceId = `device-${nanoid()}`
-        localStorage.setItem(DEVICE_ID_KEY, deviceId)
-    }
-    return deviceId
-}
-
-// Get user ID (access code if available, otherwise device ID)
-export function getUserId(): string {
-    if (typeof window === "undefined") return ""
-
-    // Check for access code first
-    const accessCode = localStorage.getItem("next-ai-draw-io-access-code")
-    if (accessCode?.trim()) {
-        return `access-${accessCode.trim()}`
-    }
-
-    // Fall back to device ID
-    return getDeviceId()
-}
-
 // Check if DB storage is configured (has DATABASE_URL)
 // In browser, we assume it's configured if API endpoints work
 export function isDBStorageAvailable(): boolean {
@@ -71,18 +43,15 @@ export function isDBStorageAvailable(): boolean {
 }
 
 // CRUD Operations via API
+// Note: userId is now handled by API via NextAuth session
 export async function getAllSessionMetadata(): Promise<SessionMetadata[]> {
-    const userId = getUserId()
-    if (!userId) return []
-
     try {
-        const res = await fetch(
-            getApiEndpoint(
-                `/api/sessions?userId=${encodeURIComponent(userId)}`,
-            ),
-        )
+        const res = await fetch(getApiEndpoint("/api/sessions"))
         if (!res.ok) {
-            // If API returns 500, DB might not be configured - fallback to empty
+            if (res.status === 401) {
+                // Not authenticated - return empty
+                return []
+            }
             console.warn("Sessions API unavailable, using empty list")
             return []
         }
@@ -107,9 +76,6 @@ export async function getSession(id: string): Promise<ChatSession | null> {
 export async function saveSession(
     session: Partial<ChatSession> & { id?: string },
 ): Promise<ChatSession | null> {
-    const userId = getUserId()
-    if (!userId) return null
-
     try {
         if (session.id) {
             // Update existing session
@@ -128,7 +94,7 @@ export async function saveSession(
             const res = await fetch(getApiEndpoint("/api/sessions"), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ...session, userId }),
+                body: JSON.stringify(session),
             })
             if (!res.ok) throw new Error("Failed to create session")
             return await res.json()
@@ -153,15 +119,11 @@ export async function deleteSession(id: string): Promise<boolean> {
 
 // Helper: Create a new empty session via API (returns full session with ID)
 export async function createEmptySession(): Promise<ChatSession | null> {
-    const userId = getUserId()
-    if (!userId) return null
-
     try {
         const res = await fetch(getApiEndpoint("/api/sessions"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                userId,
                 title: "New Chat",
                 messages: [],
                 xmlSnapshots: [],
@@ -281,14 +243,10 @@ export interface FolderMetadata {
 }
 
 export async function getAllFolders(): Promise<FolderMetadata[]> {
-    const userId = getUserId()
-    if (!userId) return []
-
     try {
-        const res = await fetch(
-            getApiEndpoint(`/api/folders?userId=${encodeURIComponent(userId)}`),
-        )
+        const res = await fetch(getApiEndpoint("/api/folders"))
         if (!res.ok) {
+            if (res.status === 401) return []
             console.warn("Folders API unavailable")
             return []
         }
@@ -302,14 +260,11 @@ export async function getAllFolders(): Promise<FolderMetadata[]> {
 export async function createFolder(
     name: string,
 ): Promise<FolderMetadata | null> {
-    const userId = getUserId()
-    if (!userId) return null
-
     try {
         const res = await fetch(getApiEndpoint("/api/folders"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId, name }),
+            body: JSON.stringify({ name }),
         })
         if (!res.ok) throw new Error("Failed to create folder")
         return await res.json()

@@ -13,7 +13,6 @@ import {
     getAllFolders,
     getAllSessionMetadata,
     getSession,
-    getUserId,
     isDBStorageAvailable,
     moveSessionToFolder as moveSessionToFolderAPI,
     renameFolder as renameFolderAPI,
@@ -120,31 +119,18 @@ export function useSessionManager(
             setIsAvailable(true)
 
             try {
-                // Check for old IndexedDB data and migrate if needed
-                const {
-                    hasOldIndexedDBData,
-                    migrateIndexedDBToPostgres,
-                    clearOldIndexedDB,
-                } = await import("@/lib/indexeddb-migration")
+                // Check for old IndexedDB data and clear if found
+                const { hasOldIndexedDBData, clearOldIndexedDB } = await import(
+                    "@/lib/indexeddb-migration"
+                )
                 const hasOldData = await hasOldIndexedDBData()
 
                 if (hasOldData) {
                     console.log(
-                        "[Session Manager] Found old IndexedDB data, migrating...",
+                        "[Session Manager] Found old IndexedDB data, skipping (migration no longer supported)",
                     )
-                    const userId = getUserId()
-                    const result = await migrateIndexedDBToPostgres(userId)
-                    console.log(
-                        `[Session Manager] Migration complete: ${result.migrated}/${result.total} sessions migrated`,
-                    )
-
-                    if (result.migrated > 0 && result.failed === 0) {
-                        // Clear old data after successful migration
-                        await clearOldIndexedDB()
-                        console.log(
-                            "[Session Manager] Old IndexedDB data cleared",
-                        )
-                    }
+                    // Clear old data without migrating
+                    await clearOldIndexedDB()
                 }
 
                 // Load sessions list
@@ -297,9 +283,6 @@ export function useSessionManager(
             ) {
                 return
             }
-
-            const userId = getUserId()
-            if (!userId) return
 
             if (!currentSession) {
                 // Create a new session if none exists

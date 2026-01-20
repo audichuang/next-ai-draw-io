@@ -32,7 +32,8 @@
                 "noStaticElementInteractions": "off",
                 "useKeyWithClickEvents": "off",
                 "noLabelWithoutControl": "off",
-                "noNoninteractiveTabindex": "off"
+                "noNoninteractiveTabindex": "off",
+                "useSemanticElements": "off"
             },
             "correctness": {
                 "useExhaustiveDependencies": "off"

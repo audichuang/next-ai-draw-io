@@ -25,7 +25,7 @@ import {
     ReasoningContent,
     ReasoningTrigger,
 } from "@/components/ai-elements/reasoning"
-import { ChatLobby } from "@/components/chat/ChatLobby"
+
 import { ToolCallCard } from "@/components/chat/ToolCallCard"
 import type { DiagramOperation, ToolPartLike } from "@/components/chat/types"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -126,28 +126,8 @@ const getUserOriginalText = (message: UIMessage): string => {
     return fullText.replace(filePattern, "").trim()
 }
 
-interface SessionMetadata {
-    id: string
-    title: string
-    createdAt: string
-    updatedAt: string
-    messageCount: number
-    hasDiagram: boolean
-    thumbnailDataUrl?: string
-}
-
-interface FolderMetadata {
-    id: string
-    name: string
-    createdAt: string
-    updatedAt: string
-    sessionCount: number
-}
-
 interface ChatMessageDisplayProps {
     messages: UIMessage[]
-    setInput: (input: string) => void
-    setFiles: (files: File[]) => void
     processedToolCallsRef: MutableRefObject<Set<string>>
     editDiagramOriginalXmlRef: MutableRefObject<Map<string, string>>
     sessionId?: string
@@ -155,22 +135,11 @@ interface ChatMessageDisplayProps {
     onEditMessage?: (messageIndex: number, newText: string) => void
     status?: "streaming" | "submitted" | "idle" | "error" | "ready"
     isRestored?: boolean
-    sessions?: SessionMetadata[]
-    folders?: FolderMetadata[]
-    onSelectSession?: (id: string) => void
-    onDeleteSession?: (id: string) => void
-    onRenameSession?: (id: string, newTitle: string) => void
-    onMoveToFolder?: (sessionId: string, folderId: string | null) => void
-    onCreateFolder?: (name: string) => void
-    onRenameFolder?: (id: string, newName: string) => void
-    onDeleteFolder?: (id: string) => void
     loadedMessageIdsRef?: MutableRefObject<Set<string>>
 }
 
 export function ChatMessageDisplay({
     messages,
-    setInput,
-    setFiles,
     processedToolCallsRef,
     editDiagramOriginalXmlRef,
     sessionId,
@@ -178,15 +147,6 @@ export function ChatMessageDisplay({
     onEditMessage,
     status = "idle",
     isRestored = false,
-    sessions = [],
-    folders = [],
-    onSelectSession,
-    onDeleteSession,
-    onRenameSession,
-    onMoveToFolder,
-    onCreateFolder,
-    onRenameFolder,
-    onDeleteFolder,
     loadedMessageIdsRef,
 }: ChatMessageDisplayProps) {
     const dict = useDictionary()
@@ -649,22 +609,7 @@ export function ChatMessageDisplay({
     return (
         <ScrollArea className="h-full w-full scrollbar-thin">
             <div ref={scrollTopRef} />
-            {messages.length === 0 && isRestored ? (
-                <ChatLobby
-                    sessions={sessions}
-                    folders={folders}
-                    onSelectSession={onSelectSession || (() => {})}
-                    onDeleteSession={onDeleteSession}
-                    onRenameSession={onRenameSession}
-                    onMoveToFolder={onMoveToFolder}
-                    onCreateFolder={onCreateFolder}
-                    onRenameFolder={onRenameFolder}
-                    onDeleteFolder={onDeleteFolder}
-                    setInput={setInput}
-                    setFiles={setFiles}
-                    dict={dict}
-                />
-            ) : messages.length === 0 ? null : (
+            {messages.length === 0 ? null : (
                 <div className="py-4 px-4 space-y-4">
                     {messages.map((message, messageIndex) => {
                         const userMessageText =

@@ -841,57 +841,6 @@ export default function ChatPanel({
         }
     }
 
-    // Handle session switching from history dropdown
-    const handleSelectSession = useCallback(
-        async (sessionId: string) => {
-            if (!sessionManager.isAvailable) return
-
-            // Save current session before switching
-            if (messages.length > 0) {
-                const sessionData = await buildSessionData({
-                    withThumbnail: true,
-                })
-                await sessionManager.saveCurrentSession(sessionData)
-            }
-
-            // Switch to selected session
-            const sessionData = await sessionManager.switchSession(sessionId)
-            if (sessionData) {
-                const hasRealDiagram = isRealDiagram(sessionData.diagramXml)
-                justLoadedSessionRef.current = true
-
-                // CRITICAL: Update latestSvgRef with the NEW session's thumbnail
-                // This prevents stale thumbnail from previous session being used by auto-save
-                latestSvgRef.current = sessionData.thumbnailDataUrl || ""
-
-                // Track if this session has no real diagram - to prevent thumbnail contamination
-                if (!hasRealDiagram) {
-                    justLoadedSessionIdRef.current = sessionId
-                } else {
-                    justLoadedSessionIdRef.current = null
-                }
-                syncUIWithSession(sessionData)
-                router.replace(`?session=${sessionId}`, { scroll: false })
-            }
-        },
-        [sessionManager, messages, buildSessionData, syncUIWithSession, router],
-    )
-
-    // Handle session deletion from history dropdown
-    const handleDeleteSession = useCallback(
-        async (sessionId: string) => {
-            if (!sessionManager.isAvailable) return
-            const result = await sessionManager.deleteSession(sessionId)
-
-            if (result.wasCurrentSession) {
-                // Deleted current session - clear UI and URL
-                syncUIWithSession(null)
-                router.replace(window.location.pathname, { scroll: false })
-            }
-        },
-        [sessionManager, syncUIWithSession, router],
-    )
-
     const handleNewChat = useCallback(async () => {
         // Save current session before creating new one
         if (sessionManager.isAvailable && messages.length > 0) {
@@ -1074,16 +1023,6 @@ export default function ChatPanel({
         }
 
         return userText
-    }
-
-    const handleRenameSession = async (id: string, newTitle: string) => {
-        if (!sessionManager.isAvailable) return
-        try {
-            await sessionManager.renameSession(id, newTitle)
-        } catch (error) {
-            console.error("Failed to rename session:", error)
-            toast.error("Failed to rename session")
-        }
     }
 
     const handleRegenerate = async (messageIndex: number) => {
@@ -1389,8 +1328,6 @@ export default function ChatPanel({
             <main className="flex-1 w-full overflow-hidden">
                 <ChatMessageDisplay
                     messages={messages}
-                    setInput={setInput}
-                    setFiles={handleFileChange}
                     processedToolCallsRef={processedToolCallsRef}
                     editDiagramOriginalXmlRef={editDiagramOriginalXmlRef}
                     sessionId={sessionId}
@@ -1398,15 +1335,6 @@ export default function ChatPanel({
                     status={status}
                     onEditMessage={handleEditMessage}
                     isRestored={isRestored}
-                    sessions={sessionManager.sessions}
-                    folders={sessionManager.folders}
-                    onSelectSession={handleSelectSession}
-                    onDeleteSession={handleDeleteSession}
-                    onRenameSession={handleRenameSession}
-                    onMoveToFolder={sessionManager.moveSessionToFolder}
-                    onCreateFolder={sessionManager.createFolder}
-                    onRenameFolder={sessionManager.renameFolder}
-                    onDeleteFolder={sessionManager.deleteFolder}
                     loadedMessageIdsRef={loadedMessageIdsRef}
                 />
             </main>

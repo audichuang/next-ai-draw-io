@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/db"
 
 interface RouteParams {
@@ -7,21 +8,26 @@ interface RouteParams {
 
 // GET /api/sessions/[id] - Get a single session
 export async function GET(_request: NextRequest, { params }: RouteParams) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { id } = await params
 
     try {
-        const session = await prisma.chatSession.findUnique({
-            where: { id },
+        const chatSession = await prisma.chatSession.findUnique({
+            where: { id, userId: session.user.id },
         })
 
-        if (!session) {
+        if (!chatSession) {
             return NextResponse.json(
                 { error: "Session not found" },
                 { status: 404 },
             )
         }
 
-        return NextResponse.json(session)
+        return NextResponse.json(chatSession)
     } catch (error) {
         console.error("Failed to get session:", error)
         return NextResponse.json(
@@ -33,6 +39,11 @@ export async function GET(_request: NextRequest, { params }: RouteParams) {
 
 // PUT /api/sessions/[id] - Update a session
 export async function PUT(request: NextRequest, { params }: RouteParams) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { id } = await params
 
     try {
@@ -47,8 +58,8 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
             folderId,
         } = body
 
-        const session = await prisma.chatSession.update({
-            where: { id },
+        const chatSession = await prisma.chatSession.update({
+            where: { id, userId: session.user.id },
             data: {
                 ...(title !== undefined && { title }),
                 ...(messages !== undefined && {
@@ -62,12 +73,11 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
                 }),
                 ...(diagramHistory !== undefined && { diagramHistory }),
                 ...(thumbnailDataUrl !== undefined && { thumbnailDataUrl }),
-                // folderId can be null (to move to uncategorized) or a string
                 ...(folderId !== undefined && { folderId }),
             },
         })
 
-        return NextResponse.json(session)
+        return NextResponse.json(chatSession)
     } catch (error) {
         console.error("Failed to update session:", error)
         return NextResponse.json(
@@ -79,11 +89,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
 // DELETE /api/sessions/[id] - Delete a session
 export async function DELETE(_request: NextRequest, { params }: RouteParams) {
+    const session = await auth()
+    if (!session?.user?.id) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
     const { id } = await params
 
     try {
         await prisma.chatSession.delete({
-            where: { id },
+            where: { id, userId: session.user.id },
         })
 
         return new NextResponse(null, { status: 204 })

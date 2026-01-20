@@ -654,7 +654,7 @@ export function getAIModel(overrides?: ClientOverrides): ModelConfig {
 
             // If auth token is provided, use Authorization header instead of x-api-key
             if (useAuthToken) {
-                anthropicHeaders["Authorization"] = `Bearer ${authToken}`
+                anthropicHeaders.Authorization = `Bearer ${authToken}`
             }
 
             const customProvider = createAnthropic({
